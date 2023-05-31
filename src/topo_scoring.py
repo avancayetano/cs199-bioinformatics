@@ -46,7 +46,7 @@ class TopoScoring:
         """
 
         return (
-            pl.col(NEIGHBORS).arr.eval(pl.element().arr.get(1).cast(float)).arr.sum()
+            pl.col(NEIGHBORS).list.eval(pl.element().list.get(1).cast(float)).list.sum()
         ).alias(W_DEG)
 
     def get_neighbors(self, df_w_ppin: pl.DataFrame) -> pl.DataFrame:
@@ -150,14 +150,14 @@ class TopoScoring:
 
         return (
             pl.col(f"{NEIGHBORS}_{PROTEIN_U}")
-            .arr.concat(f"{NEIGHBORS}_{PROTEIN_V}")
-            .arr.eval(
+            .list.concat(f"{NEIGHBORS}_{PROTEIN_V}")
+            .list.eval(
                 pl.element()
-                .filter(pl.element().arr.get(0).is_duplicated())
-                .arr.get(1)
+                .filter(pl.element().list.get(0).is_duplicated())
+                .list.get(1)
                 .cast(float)
             )  # the above eval gets the intersection of N_u and N_v
-            .arr.sum()
+            .list.sum()
         ).alias(NUMERATOR)
 
     def denominator_expr(self, avg_prot_w_deg: float) -> pl.Expr:

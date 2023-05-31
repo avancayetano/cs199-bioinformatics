@@ -53,23 +53,23 @@ class CoExpScoring:
         )
         return srs_gene_exp_prots
 
-    def filter_ppis(
-        self, df_ppin: pl.DataFrame, srs_gene_exp_prots: pl.Series
+    def filter_edges(
+        self, df_edges: pl.DataFrame, srs_gene_exp_prots: pl.Series
     ) -> pl.DataFrame:
         """
-        Filters out PPIs who have a protein that does not have
+        Filters out edges which have a protein that does not have
         gene expression data.
 
         Args:
-            df_ppin (pl.DataFrame): _description_
+            df_edges (pl.DataFrame): _description_
             srs_gene_exp_prots (pl.Series): _description_
 
         Returns:
             pl.DataFrame: _description_
         """
 
-        df_ppin_filtered = (
-            df_ppin.lazy()
+        df_filtered = (
+            df_edges.lazy()
             .filter(
                 pl.col(PROTEIN_U).is_in(srs_gene_exp_prots)
                 & pl.col(PROTEIN_V).is_in(srs_gene_exp_prots)
@@ -77,71 +77,22 @@ class CoExpScoring:
             .collect()
         )
 
-        return df_ppin_filtered
-
-    def melt_ppin_gene_exp(
-        self,
-        df_ppin_filtered: pl.DataFrame,
-        df_gene_exp_std: pl.DataFrame,
-        time_points: List[str],
-    ) -> pl.DataFrame:
-        df_ppin_gene_exp = (
-            df_ppin_filtered.lazy()
-            .join(
-                df_gene_exp_std.lazy(),
-                left_on=PROTEIN_U,
-                right_on=PROTEIN,
-                how="left",
-            )
-            .rename({t: f"{t}_{PROTEIN_U}" for t in time_points})
-            .join(
-                df_gene_exp_std.lazy(), left_on=PROTEIN_V, right_on=PROTEIN, how="left"
-            )
-            .rename({t: f"{t}_{PROTEIN_V}" for t in time_points})
-            .collect()
-        )
-
-        df_melted = pl.concat(
-            [
-                df_ppin_gene_exp.select(
-                    [PROTEIN_U] + [f"{t}_{PROTEIN_U}" for t in time_points]
-                ).melt(
-                    id_vars=PROTEIN_U,
-                    variable_name=f"T_{PROTEIN_U}",
-                    value_name=f"GE_{PROTEIN_U}",
-                ),
-                df_ppin_gene_exp.select(
-                    [PROTEIN_V] + [f"{t}_{PROTEIN_V}" for t in time_points]
-                ).melt(
-                    id_vars=PROTEIN_V,
-                    variable_name=f"T_{PROTEIN_V}",
-                    value_name=f"GE_{PROTEIN_V}",
-                ),
-            ],
-            how="horizontal",
-        )
-
-        return df_melted
-
-    def normalize_score(self) -> pl.Expr:
-        """
-        Normalizes the scores.
-
-        Returns:
-            pl.Expr: _description_
-        """
-
-        return (
-            (pl.col(SCORE) - pl.col(SCORE).min())
-            / (pl.col(SCORE).max() - pl.col(SCORE).min())
-        ).alias(SCORE)
-
-    def mse_expr(self, col_a: str, col_b: str) -> pl.Expr:
-        return (pl.col(col_a) - pl.col(col_b)).pow(2).mean()
+        return df_filtered
 
     def standardize_gene_exp(
         self, df_gene_exp: pl.DataFrame, time_points: List[str]
     ) -> pl.DataFrame:
+        """
+        NOTE: not used...
+
+        Args:
+            df_gene_exp (pl.DataFrame): _description_
+            time_points (List[str]): _description_
+
+        Returns:
+            pl.DataFrame: _description_
+        """
+
         n = len(time_points)
         df_gene_exp_std = (
             df_gene_exp.lazy()
@@ -169,6 +120,17 @@ class CoExpScoring:
     def normalize_gene_exp(
         self, df_gene_exp: pl.DataFrame, time_points: List[str]
     ) -> pl.DataFrame:
+        """
+        NOTE: not used...
+
+        Args:
+            df_gene_exp (pl.DataFrame): _description_
+            time_points (List[str]): _description_
+
+        Returns:
+            pl.DataFrame: _description_
+        """
+
         df_gene_exp_norm = (
             df_gene_exp.lazy()
             .with_columns(
@@ -185,66 +147,109 @@ class CoExpScoring:
 
         return df_gene_exp_norm
 
+    def melt_edges_gene_exp(
+        self,
+        df_filtered: pl.DataFrame,
+        df_gene_exp: pl.DataFrame,
+        time_points: List[str],
+    ) -> pl.DataFrame:
+        df_edges_gene_exp = (
+            df_filtered.lazy()
+            .join(
+                df_gene_exp.lazy(),
+                left_on=PROTEIN_U,
+                right_on=PROTEIN,
+                how="left",
+            )
+            .rename({t: f"{t}_{PROTEIN_U}" for t in time_points})
+            .join(df_gene_exp.lazy(), left_on=PROTEIN_V, right_on=PROTEIN, how="left")
+            .rename({t: f"{t}_{PROTEIN_V}" for t in time_points})
+            .collect()
+        )
+
+        df_melted = pl.concat(
+            [
+                df_edges_gene_exp.select(
+                    [PROTEIN_U] + [f"{t}_{PROTEIN_U}" for t in time_points]
+                ).melt(
+                    id_vars=PROTEIN_U,
+                    variable_name=f"T_{PROTEIN_U}",
+                    value_name=f"GE_{PROTEIN_U}",
+                ),
+                df_edges_gene_exp.select(
+                    [PROTEIN_V] + [f"{t}_{PROTEIN_V}" for t in time_points]
+                ).melt(
+                    id_vars=PROTEIN_V,
+                    variable_name=f"T_{PROTEIN_V}",
+                    value_name=f"GE_{PROTEIN_V}",
+                ),
+            ],
+            how="horizontal",
+        )
+
+        return df_melted
+
+    def remove_negative_corr(self) -> pl.Expr:
+        """
+        Returns:
+            pl.Expr: Removes protein pairs with negative gene expression correlation.
+        """
+        return (
+            pl.when(pl.col(SCORE) < 0)
+            .then(pl.lit(0))
+            .otherwise(pl.col(SCORE))
+            .alias(SCORE)
+        )
+
+    def normalize(self) -> pl.Expr:
+        """
+        Returns:
+            pl.Expr: Normalizes the scores.
+        """
+
+        return (
+            (pl.col(SCORE) - pl.col(SCORE).min())
+            / (pl.col(SCORE).max() - pl.col(SCORE).min())
+        ).alias(SCORE)
+
     def score(
-        self, df_ppin_filtered: pl.DataFrame, df_gene_exp: pl.DataFrame
+        self, df_filtered: pl.DataFrame, df_gene_exp: pl.DataFrame
     ) -> pl.DataFrame:
         """
         Finds the correlation of the gene expression of each protein pair per cycle.
 
         Args:
-            df_ppin_filtered (pl.DataFrame): _description_
-            df_active_pr (pl.DataFrame): _description_
-            time_points (List[str]): _description_
-            n (int): _description_
+            df_filtered (pl.DataFrame): _description_
+            df_gene_exp (pl.DataFrame): _description_
 
         Returns:
             pl.DataFrame: _description_
         """
-        df_w_ppin = df_ppin_filtered.select([PROTEIN_U, PROTEIN_V])
 
-        n_cycles = 3  # 3 cycles
-        for cycle_idx in range(n_cycles):
-            n = 12  # 12 time points per cycle
-            time_points = [
-                f"T{i}" for i in range(cycle_idx * n + 1, (cycle_idx + 1) * n + 1)
-            ]
+        time_points = [f"T{i}" for i in range(1, 37)]  # 36 time points
 
-            df_gene_exp_std = self.standardize_gene_exp(df_gene_exp, time_points)
+        df_melted = self.melt_edges_gene_exp(
+            df_filtered,
+            df_gene_exp,
+            time_points,
+        ).select(pl.exclude([f"T_{PROTEIN_U}", f"T_{PROTEIN_V}"]))
 
-            df_melted = self.melt_ppin_gene_exp(
-                df_ppin_filtered,
-                df_gene_exp_std,
-                time_points,
-            ).select(pl.exclude([f"T_{PROTEIN_U}", f"T_{PROTEIN_V}"]))
+        df_w_edges = (
+            df_melted.lazy()
+            .groupby([PROTEIN_U, PROTEIN_V], maintain_order=True)
+            .agg(pl.corr(f"GE_{PROTEIN_U}", f"GE_{PROTEIN_V}").alias(SCORE))
+            .with_columns(self.remove_negative_corr())
+            .collect()
+        )
 
-            df_corr = (
-                df_melted.lazy()
-                .groupby([PROTEIN_U, PROTEIN_V], maintain_order=True)
-                .agg(
-                    pl.corr(f"GE_{PROTEIN_U}", f"GE_{PROTEIN_V}").alias(
-                        f"CORR_{cycle_idx}"
-                    )
-                )
-                .collect()
-            )
+        return df_w_edges
 
-            df_w_ppin = df_w_ppin.join(df_corr, on=[PROTEIN_U, PROTEIN_V], how="left")
-
-        df_w_ppin = df_w_ppin.with_columns(
-            (
-                pl.sum([f"CORR_{cycle_idx}" for cycle_idx in range(n_cycles)])
-                / n_cycles
-            ).alias(SCORE)
-        ).with_columns(self.normalize_score())
-
-        return df_w_ppin
-
-    def main(self, df_ppin: pl.DataFrame) -> pl.DataFrame:
+    def main(self, df_edges: pl.DataFrame) -> pl.DataFrame:
         """
         CoExpScoring main method.
 
         Args:
-            df_ppin (pl.DataFrame): _description_
+            df_edges (pl.DataFrame): _description_
             df_gene_exp (pl.DataFrame): _description_
 
         Returns:
@@ -257,33 +262,37 @@ class CoExpScoring:
         )
 
         srs_gene_exp_prots = self.get_gene_exp_prots(df_gene_exp)
-        df_ppin_filtered = self.filter_ppis(df_ppin, srs_gene_exp_prots)
+        df_filtered = self.filter_edges(df_edges, srs_gene_exp_prots)
 
-        df_w_ppin = self.score(df_ppin_filtered, df_gene_exp)
+        df_w_edges = self.score(df_filtered, df_gene_exp)
 
-        df_w_ppin = (
-            df_ppin.join(df_w_ppin, on=[PROTEIN_U, PROTEIN_V], how="left")
+        df_w_edges = (
+            df_edges.join(df_w_edges, on=[PROTEIN_U, PROTEIN_V], how="left")
             .fill_null(0.0)
             .select([PROTEIN_U, PROTEIN_V, SCORE])
         )
 
-        return df_w_ppin
+        return df_w_edges
 
 
 if __name__ == "__main__":
     start_time = time.time()
 
-    df_ppin = pl.read_csv("../data/preprocessed/swc_composite_data.csv").select(
-        [PROTEIN_U, PROTEIN_V]
+    df_edges = pl.read_csv(
+        "../data/preprocessed/swc_edges.csv",
+        has_header=False,
+        new_columns=[PROTEIN_U, PROTEIN_V],
     )
 
     co_exp_scoring = CoExpScoring()
-    df_ppin_co_exp = co_exp_scoring.main(df_ppin)
+    df_w_edges = co_exp_scoring.main(df_edges)
 
-    print(f">>> [{SCORE}] Scored PPIN")
-    print(df_ppin_co_exp)
+    print(f">>> [{SCORE}] Scored Edges")
+    print(df_w_edges)
 
-    df_ppin_co_exp.write_csv("../data/scores/swc_co_exp.csv", has_header=True)
+    print(df_w_edges.describe())
+
+    df_w_edges.write_csv("../data/scores/co_exp_scores.csv", has_header=True)
 
     print(f">>> [{SCORE}] Execution Time")
     print(time.time() - start_time)

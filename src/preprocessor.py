@@ -7,16 +7,16 @@ from aliases import (
     CO_OCCUR,
     COMPLEX_ID,
     COMPLEX_PROTEINS,
+    CROSS_VAL_ITER,
     PROTEIN_U,
     PROTEIN_V,
     PUBMED,
     STRING,
     TOPO,
     TOPO_L2,
-    XVAL_ITER,
 )
 from assertions import assert_prots_sorted
-from utils import get_cyc_complexes, sort_prot_cols
+from utils import get_all_cyc_complexes, sort_prot_cols
 
 
 class Preprocessor:
@@ -24,9 +24,9 @@ class Preprocessor:
     Preprocessor of data.
     """
 
-    def preprocess_swc_composite(self) -> pl.DataFrame:
+    def read_swc_composite_network(self) -> pl.DataFrame:
         """
-        Preprocess the composite PPIN of SWC.
+        Preprocess the composite protein network of SWC.
 
         Returns:
             pl.DataFrame: _description_
@@ -76,7 +76,7 @@ class Preprocessor:
 
         df_ppin = (
             df_swc.lazy()
-            .filter(pl.col(TOPO).is_not_null())
+            .filter(pl.col(TOPO).is_not_null() & (pl.col(TOPO) > 0))
             .select([PROTEIN_U, PROTEIN_V])
             .collect()
         )
@@ -101,13 +101,12 @@ class Preprocessor:
         )
 
         df_nips = (
-            (
-                pl.scan_csv(
-                    f"../data/databases/negatome_combined_stringent.txt",
-                    has_header=False,
-                    separator="\t",
-                ).rename({"column_1": "u", "column_2": "v"})
+            pl.scan_csv(
+                f"../data/databases/negatome_combined_stringent.txt",
+                has_header=False,
+                separator="\t",
             )
+            .rename({"column_1": "u", "column_2": "v"})
             .join(df_mapping, left_on="u", right_on="From", how="inner")
             .join(df_mapping, left_on="v", right_on="From", how="inner")
             .drop(["u", "v"])
@@ -137,7 +136,7 @@ class Preprocessor:
         fold_size = round((1 / k) * len(list_large_complexes))
 
         output = ""
-        xval: Dict[int, List[str]] = {}
+        cross_val: Dict[int, List[str]] = {}
 
         for i in range(k):
             output += f"iter\t{i}\n"
@@ -147,7 +146,7 @@ class Preprocessor:
             if end >= len(list_large_complexes):
                 fold += list_large_complexes[0 : end - len(list_large_complexes)]
 
-            # testing set for this round...
+            # testing dataset for this round...
             testing_set = list(
                 filter(lambda complex_id: complex_id not in fold, list_large_complexes)
             )
@@ -155,26 +154,26 @@ class Preprocessor:
             for complex_id in testing_set:
                 output += f"{complex_id}\n"
 
-                if complex_id in xval:
-                    xval[complex_id].append(f"{XVAL_ITER}_{i}")
+                if complex_id in cross_val:
+                    cross_val[complex_id].append(f"{CROSS_VAL_ITER}_{i}")
                 else:
-                    xval[complex_id] = [f"{XVAL_ITER}_{i}"]
+                    cross_val[complex_id] = [f"{CROSS_VAL_ITER}_{i}"]
         output = output.strip()
 
-        return output, xval
+        return output, cross_val
 
-    def xval_to_df(self, k: int, xval: Dict[int, List[str]]) -> pl.DataFrame:
-        XvalDict = TypedDict(
-            "XvalDict", {"COMPLEX_ID": List[int], "ITERS": List[List[str]]}
+    def cross_val_to_df(self, k: int, cross_val: Dict[int, List[str]]) -> pl.DataFrame:
+        CrossValDict = TypedDict(
+            "CrossValDict", {"COMPLEX_ID": List[int], "ITERS": List[List[str]]}
         )
-        xval_dict: XvalDict = {COMPLEX_ID: [], "ITERS": []}
+        cross_val_dict: CrossValDict = {COMPLEX_ID: [], "ITERS": []}
 
-        for complex_id in xval:
-            xval_dict[COMPLEX_ID].append(complex_id)
-            xval_dict["ITERS"].append(xval[complex_id])
+        for complex_id in cross_val:
+            cross_val_dict[COMPLEX_ID].append(complex_id)
+            cross_val_dict["ITERS"].append(cross_val[complex_id])
 
-        df_xval = (
-            pl.LazyFrame(xval_dict)
+        df_cross_val = (
+            pl.LazyFrame(cross_val_dict)
             .explode("ITERS")
             .with_columns(pl.lit("test").alias("VALUES"))
             .collect()
@@ -192,12 +191,14 @@ class Preprocessor:
             )
             .fill_null(pl.lit("train"))
             .sort(pl.col(COMPLEX_ID))
-            .select([COMPLEX_ID] + list(sorted([f"{XVAL_ITER}_{i}" for i in range(k)])))
+            .select(
+                [COMPLEX_ID] + list(sorted([f"{CROSS_VAL_ITER}_{i}" for i in range(k)]))
+            )
             .collect()
         )
-        return df_xval
+        return df_cross_val
 
-    def generate_xval_data(
+    def generate_cross_val_data(
         self, df_complexes: pl.DataFrame
     ) -> Tuple[str, pl.DataFrame]:
         """
@@ -213,7 +214,7 @@ class Preprocessor:
         """
 
         list_large_complexes: List[int] = (
-            df_complexes.filter(pl.col(COMPLEX_PROTEINS).arr.lengths() > 3)
+            df_complexes.filter(pl.col(COMPLEX_PROTEINS).list.lengths() > 3)
             .select(pl.col(COMPLEX_ID))
             .to_series()
             .shuffle(seed=12345)
@@ -221,17 +222,17 @@ class Preprocessor:
         )
 
         k = 10  # 10 folds, 10 rounds
-        output, xval = self.generate_kfolds(k, list_large_complexes)
-        df_xval = self.xval_to_df(k, xval)
+        output, cross_val = self.generate_kfolds(k, list_large_complexes)
+        df_cross_val = self.cross_val_to_df(k, cross_val)
 
-        return output, df_xval  # output is for the SWC software
+        return output, df_cross_val  # output is for the SWC software
 
     def read_irefindex(self) -> pl.DataFrame:
-        physical_interactions = [
-            'psi-mi:"MI:0914"(association)',
-            'psi-mi:"MI:0915"(physical association)',
-            'psi-mi:"MI:0407"(direct interaction)',
-        ]
+        # physical_interactions = [
+        #     'psi-mi:"MI:0914"(association)',
+        #     'psi-mi:"MI:0915"(physical association)',
+        #     'psi-mi:"MI:0407"(direct interaction)',
+        # ]
         df = (
             pl.scan_csv(
                 "../data/databases/large/irefindex 559292 mitab26.txt", separator="\t"
@@ -240,12 +241,12 @@ class Preprocessor:
                 [
                     "altA",
                     "altB",
-                    "author",
+                    # "author",
                     "pmids",
                     "taxa",
                     "taxb",
-                    "interactionType",
-                    "sourcedb",
+                    # "interactionType",
+                    # "sourcedb",
                     "edgetype",
                 ]
             )
@@ -255,7 +256,7 @@ class Preprocessor:
                 & (pl.col("taxb").str.starts_with("taxid:559292"))
                 & (pl.col("altA").str.starts_with("cygd:"))
                 & (pl.col("altB").str.starts_with("cygd:"))
-                & (pl.col("interactionType").is_in(physical_interactions))
+                # & (pl.col("interactionType").is_in(physical_interactions))
             )
             .with_columns(
                 [
@@ -268,7 +269,7 @@ class Preprocessor:
             # .filter(pl.col("YEAR") < "2012")
             .select([PROTEIN_U, PROTEIN_V, PUBMED])
             .with_columns(sort_prot_cols(PROTEIN_U, PROTEIN_V))
-            .unique(keep="first")
+            .unique(maintain_order=True)
             .collect()
         )
 
@@ -283,11 +284,11 @@ if __name__ == "__main__":
 
     preprocessor = Preprocessor()
     df_nips = preprocessor.get_nips()
-    df_swc = preprocessor.preprocess_swc_composite()
+    df_swc = preprocessor.read_swc_composite_network()
     df_irefindex = preprocessor.read_irefindex()
 
-    df_complexes = get_cyc_complexes()
-    output, df_xval = preprocessor.generate_xval_data(df_complexes)
+    df_complexes = get_all_cyc_complexes()
+    output, df_cross_val = preprocessor.generate_cross_val_data(df_complexes)
 
     print(">>> NIPS")
     print(df_nips)
@@ -301,23 +302,23 @@ if __name__ == "__main__":
     print(">>> COMPLEXES")
     print(df_complexes)
 
-    print(">>> XVAL DATA")
-    print(df_xval)
+    print(">>> CROSS VAL DATA")
+    print(df_cross_val)
 
     # Write files...
     df_nips.write_csv("../data/preprocessed/yeast_nips.csv", has_header=False)
 
-    df_swc.write_csv("../data/preprocessed/swc_composite_data.csv", has_header=True)
+    df_swc.write_csv("../data/scores/swc_composite_scores.csv", has_header=True)
 
     df_swc.select([PROTEIN_U, PROTEIN_V]).write_csv(
-        "../data/preprocessed/swc_composite_pairs.csv", has_header=False
+        "../data/preprocessed/swc_edges.csv", has_header=False
     )
 
     df_irefindex.write_csv("../data/preprocessed/irefindex_pubmed.csv", has_header=True)
 
     with open("../data/preprocessed/cross_val.csv", "w") as file:
         file.write(output)
-    df_xval.write_csv("../data/preprocessed/cross_val_table.csv", has_header=True)
+    df_cross_val.write_csv("../data/preprocessed/cross_val_table.csv", has_header=True)
 
     print(">>> Execution Time")
     print(time.time() - start_time)

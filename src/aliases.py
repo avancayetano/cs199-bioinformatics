@@ -7,7 +7,7 @@ COMPLEX_ID = "COMPLEX_ID"
 COMPLEX_PROTEINS = "COMPLEX_PROTEINS"
 COMPLEX_DESCRIPTION = "COMPLEX_DESCRIPTION"
 
-XVAL_ITER = "ITER"  # for cross-validation iterations
+CROSS_VAL_ITER = "ITER"  # for cross-validation iterations
 
 # Features
 REL = "REL"  # Experiment reliability - MV Scoring (Post-processed)

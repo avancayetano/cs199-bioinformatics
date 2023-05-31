@@ -1,33 +1,16 @@
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
 import polars as pl
 
 from aliases import (
-    CO_EXP,
-    CO_OCCUR,
     COMPLEX_DESCRIPTION,
     COMPLEX_ID,
     COMPLEX_PROTEINS,
-    GO_BP,
-    GO_CC,
-    GO_MF,
     PROTEIN,
     PROTEIN_U,
     PROTEIN_V,
-    REL,
-    STRING,
-    TOPO,
-    TOPO_L2,
 )
 from assertions import assert_prots_sorted
-
-
-def read_no_header_file(path: str, cols: List[str]) -> pl.DataFrame:
-    df = pl.read_csv(path, has_header=False).rename(
-        {f"column_{idx+1}": col for idx, col in enumerate(cols)}
-    )
-
-    return df
 
 
 def sort_prot_cols(prot_u: str, prot_v: str) -> List[pl.Expr]:
@@ -52,80 +35,49 @@ def sort_prot_cols(prot_u: str, prot_v: str) -> List[pl.Expr]:
     return exp
 
 
-def construct_composite_ppin(
-    features: List[str] = [
-        TOPO,
-        TOPO_L2,
-        STRING,
-        CO_OCCUR,
-        REL,
-        CO_EXP,
-        GO_CC,
-        GO_BP,
-        GO_MF,
-    ]
-) -> pl.DataFrame:
+def construct_composite_network(features: Union[List[str], None]) -> pl.DataFrame:
     """
-    Constructs the composite PPIN based on the selected features.
+    Constructs the composite protein network based on the selected features.
     By default, gets all the features.
 
     Returns:
         pl.DataFrame: _description_
     """
 
-    swc_features = [TOPO, TOPO_L2, STRING, CO_OCCUR]
+    scores_files = [
+        "co_exp_scores.csv",
+        "go_ss_scores.csv",
+        "rel_scores.csv",
+        "swc_composite_scores.csv",
+    ]
 
-    df_swc_composite = pl.read_csv("../data/preprocessed/swc_composite_data.csv")
+    lf_composite = pl.LazyFrame()
+    for file in scores_files:
+        lf_score = pl.scan_csv(
+            f"../data/scores/{file}", null_values="None"
+        ).with_columns(sort_prot_cols(PROTEIN_U, PROTEIN_V))
 
-    if len(features) == 0:
-        assert_prots_sorted(df_swc_composite)
-        return df_swc_composite.select([PROTEIN_U, PROTEIN_V])
-
-    scores_files = {
-        REL: f"../data/scores/swc_rel.csv",
-        CO_EXP: f"../data/scores/swc_co_exp.csv",
-    }
-
-    go_features: List[str] = []
-    lf_features: List[pl.LazyFrame] = []
-    for F in features:
-        if F in [GO_CC, GO_BP, GO_MF]:
-            go_features.append(F)
-        elif F in swc_features:
-            lf_features.append(
-                df_swc_composite.select([PROTEIN_U, PROTEIN_V, F]).lazy()
-            )
+        if lf_composite.collect().is_empty():
+            lf_composite = lf_score
         else:
-            lf_features.append(
-                pl.scan_csv(scores_files[F], has_header=True)
-                .with_columns(sort_prot_cols(PROTEIN_U, PROTEIN_V))
-                .select([PROTEIN_U, PROTEIN_V, F])
+            lf_composite = lf_composite.join(
+                lf_score, on=[PROTEIN_U, PROTEIN_V], how="outer"
             )
 
-    if len(go_features) > 0:
-        lf_features.append(
-            pl.scan_csv(
-                f"../data/scores/swc_go_ss.csv",
-                has_header=True,
-                null_values="None",
-            )
-            .with_columns(sort_prot_cols(PROTEIN_U, PROTEIN_V))
-            .select([PROTEIN_U, PROTEIN_V, *go_features])
+    if features is None:
+        df_composite = lf_composite.fill_null(0.0).collect()
+    else:
+        df_composite = (
+            lf_composite.fill_null(0.0)
+            .select([PROTEIN_U, PROTEIN_V, *features])
+            .collect()
         )
 
-    lf_composite_ppin = lf_features[0]
-
-    for lf in lf_features[1:]:
-        lf_composite_ppin = lf_composite_ppin.join(
-            other=lf, on=[PROTEIN_U, PROTEIN_V], how="outer"
-        )
-
-    df_composite_ppin = lf_composite_ppin.fill_null(0.0).collect()
-    assert_prots_sorted(df_composite_ppin)
-    return df_composite_ppin
+    assert_prots_sorted(df_composite)
+    return df_composite
 
 
-def get_cyc_complexes() -> pl.DataFrame:
+def get_all_cyc_complexes() -> pl.DataFrame:
     df_complexes = (
         pl.scan_csv("../data/swc/complexes_CYC.txt", has_header=False, separator="\t")
         .rename(
@@ -144,7 +96,7 @@ def get_cyc_complexes() -> pl.DataFrame:
     return df_complexes
 
 
-def get_cyc_proteins() -> pl.Series:
+def get_all_cyc_proteins() -> pl.Series:
     srs_proteins = (
         pl.scan_csv("../data/swc/complexes_CYC.txt", has_header=False, separator="\t")
         .rename(
@@ -165,7 +117,7 @@ def get_cyc_proteins() -> pl.Series:
 
 def get_all_cyc_complex_pairs() -> pl.DataFrame:
     complexes: List[List[str]] = (
-        get_cyc_complexes().select(COMPLEX_PROTEINS).to_series().to_list()
+        get_all_cyc_complexes().select(COMPLEX_PROTEINS).to_series().to_list()
     )
 
     co_complex_pairs: List[Tuple[str, str]] = []
