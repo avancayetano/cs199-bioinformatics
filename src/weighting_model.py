@@ -14,8 +14,8 @@ from aliases import (
     GO_CC,
     GO_MF,
     IS_CO_COMPLEX,
-    PROB_CO_COMP,
-    PROB_NON_CO_COMP,
+    PROBA_CO_COMP,
+    PROBA_NON_CO_COMP,
     PROTEIN,
     PROTEIN_U,
     PROTEIN_V,
@@ -247,7 +247,7 @@ class WeightingModel:
         df_weights = pl.from_numpy(
             ndarr_pred,
             schema=[
-                PROB_CO_COMP if c else PROB_NON_CO_COMP
+                PROBA_CO_COMP if c else PROBA_NON_CO_COMP
                 for c in self.model_.classes_.tolist()
             ],
         )
@@ -269,7 +269,7 @@ class WeightingModel:
         )
 
         # print(">>> All classified Co-complex edges...")
-        # print(df_w_ppin.filter(pl.col(PROB_CO_COMP) > 0.5))
+        # print(df_w_ppin.filter(pl.col(PROBA_CO_COMP) > 0.5))
 
         # self.validate(df_w_ppin)
 

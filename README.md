@@ -100,6 +100,9 @@ Link:
 
 - `insert link`
 
+Command:
+`python TCSS/tcss.py -i data/preprocessed/swc_edges.csv -o data/scores/go_ss_scores.csv --drop="IEA" --gene=data/databases/gene_association.sgd.20230313.gaf --go=data/databases/go-basic.obo`
+
 ### SWC
 
 This study also uses the SWC software package and source files. The SWC method was proposed by Yong et. al. (2012) on their study: _Supervised maximum-likelihood weighting of composite protein networks for complex prediction_.
@@ -107,6 +110,9 @@ This study also uses the SWC software package and source files. The SWC method w
 Link:
 
 - `insert link`
+
+Command:
+`perl score_edges.pl -i data_yeast.txt -c complexes_CYC.txt -m x -x cross_val.csv -e 0 -o "swc"`
 
 ### UniProt ID Mapping
 
@@ -117,3 +123,7 @@ Link
 - https://www.uniprot.org/id-mapping
 
 ### MCL
+
+`~/local/bin/mcl path/to/weighted_network.csv --abc -I 4.0`
+
+(will output out.{file}.csv.I40 to the current path)

@@ -1,4 +1,4 @@
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple
 
 import polars as pl
 
@@ -6,6 +6,7 @@ from aliases import (
     COMPLEX_DESCRIPTION,
     COMPLEX_ID,
     COMPLEX_PROTEINS,
+    CROSS_VAL_ITER,
     PROTEIN,
     PROTEIN_U,
     PROTEIN_V,
@@ -35,7 +36,7 @@ def sort_prot_cols(prot_u: str, prot_v: str) -> List[pl.Expr]:
     return exp
 
 
-def construct_composite_network(features: Union[List[str], None]) -> pl.DataFrame:
+def construct_composite_network(features: Optional[List[str]] = None) -> pl.DataFrame:
     """
     Constructs the composite protein network based on the selected features.
     By default, gets all the features.
@@ -96,6 +97,20 @@ def get_all_cyc_complexes() -> pl.DataFrame:
     return df_complexes
 
 
+def get_unique_proteins(df: pl.DataFrame) -> pl.Series:
+    srs_proteins = (
+        df.lazy()
+        .select([PROTEIN_U, PROTEIN_V])
+        .melt(variable_name="PROTEIN_X", value_name=PROTEIN)
+        .select(PROTEIN)
+        .unique()
+        .collect()
+        .to_series()
+    )
+
+    return srs_proteins
+
+
 def get_all_cyc_proteins() -> pl.Series:
     srs_proteins = (
         pl.scan_csv("../data/swc/complexes_CYC.txt", has_header=False, separator="\t")
@@ -115,10 +130,19 @@ def get_all_cyc_proteins() -> pl.Series:
     return srs_proteins
 
 
-def get_all_cyc_complex_pairs() -> pl.DataFrame:
-    complexes: List[List[str]] = (
-        get_all_cyc_complexes().select(COMPLEX_PROTEINS).to_series().to_list()
-    )
+def get_cyc_complex_pairs(df_complex_ids: Optional[pl.DataFrame] = None):
+    df_all_complexes = get_all_cyc_complexes()
+    if df_complex_ids is None:
+        complexes: List[List[str]] = (
+            df_all_complexes.select(COMPLEX_PROTEINS).to_series().to_list()
+        )
+    else:
+        complexes: List[List[str]] = (
+            df_complex_ids.join(df_all_complexes, on=COMPLEX_ID, how="left")
+            .select(COMPLEX_PROTEINS)
+            .to_series()
+            .to_list()
+        )
 
     co_complex_pairs: List[Tuple[str, str]] = []
     for cmp in complexes:
@@ -130,7 +154,6 @@ def get_all_cyc_complex_pairs() -> pl.DataFrame:
         ]
         co_complex_pairs.extend(pairs)
 
-    # Why do column names start with column_0 and not column_1 ???
     df_cmp_pairs = (
         pl.LazyFrame(co_complex_pairs, orient="row")
         .rename({"column_0": "u", "column_1": "v"})
@@ -144,36 +167,18 @@ def get_all_cyc_complex_pairs() -> pl.DataFrame:
     return df_cmp_pairs
 
 
-def get_xval_complex_pairs(xval_iter: int) -> pl.DataFrame:
-    """
-    Gets all the co-complex pairs from the training/testing protein complexes.
+def get_cyc_train_test_cmp_pairs(iter: int) -> Tuple[pl.DataFrame, pl.DataFrame]:
+    df_cross_val = pl.read_csv("../data/preprocessed/cross_val_table.csv")
 
-    TODO: Redo this.
-    """
+    df_train_ids = df_cross_val.filter(
+        pl.col(f"{CROSS_VAL_ITER}_{iter}") == "train"
+    ).select(COMPLEX_ID)
 
-    pass
-    return pl.DataFrame()
+    df_test_ids = df_cross_val.filter(
+        pl.col(f"{CROSS_VAL_ITER}_{iter}") == "test"
+    ).select(COMPLEX_ID)
 
-    # co_complex_pairs: List[Tuple[str, str]] = []
+    df_train = get_cyc_complex_pairs(df_train_ids)
+    df_test = get_cyc_complex_pairs(df_test_ids)
 
-    # for cmp in complexes:
-    #     complex = list(cmp)
-    #     pairs = [
-    #         (prot_i, prot_j)
-    #         for i, prot_i in enumerate(complex[:-1])
-    #         for prot_j in complex[i + 1 :]
-    #     ]
-    #     co_complex_pairs.extend(pairs)
-
-    # # Why do column names start with column_0 and not column_1 ???
-    # df_cmp_pairs = (
-    #     pl.LazyFrame(co_complex_pairs, orient="row")
-    #     .rename({"column_0": "u", "column_1": "v"})
-    #     .with_columns(sort_prot_cols("u", "v"))
-    #     .select([PROTEIN_U, PROTEIN_V])
-    #     .unique()
-    #     .collect()
-    # )
-    # assert_prots_sorted(df_cmp_pairs)
-
-    # return df_cmp_pairs
+    return df_train, df_test

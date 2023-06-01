@@ -16,8 +16,8 @@ from aliases import (
     GO_BP,
     GO_CC,
     GO_MF,
-    PROB_CO_COMP,
-    PROB_NON_CO_COMP,
+    PROBA_CO_COMP,
+    PROBA_NON_CO_COMP,
     PROTEIN,
     PROTEIN_U,
     PROTEIN_V,
@@ -69,7 +69,7 @@ class MultinomialNBWeighting(WeightingModel):
 
         df_w_ppin = (
             self.weight(df_composite_ppin, df_labeled)
-            .rename({PROB_CO_COMP: SCORE})
+            .rename({PROBA_CO_COMP: SCORE})
             .select([PROTEIN_U, PROTEIN_V, SCORE])
         )
 

@@ -29,8 +29,8 @@ from assertions import assert_prots_sorted
 from utils import read_no_header_file, sort_prot_cols
 from weighting_model import WeightingModel
 
-PROB_CO_COMP = "P(co-comp|F=f)"
-PROB_NON_CO_COMP = "P(non-co-comp|F=f)"
+PROBA_CO_COMP = "P(co-comp|F=f)"
+PROBA_NON_CO_COMP = "P(non-co-comp|F=f)"
 SCORE = "WEIGHT"
 
 
@@ -72,7 +72,7 @@ class MLPWeighting(WeightingModel):
 
         df_w_ppin = (
             self.weight(df_composite_ppin, df_labeled)
-            .rename({PROB_CO_COMP: SCORE})
+            .rename({PROBA_CO_COMP: SCORE})
             .select([PROTEIN_U, PROTEIN_V, SCORE])
         )
 

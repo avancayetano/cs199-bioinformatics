@@ -7,7 +7,7 @@ from imodels.discretization.mdlp import MDLPDiscretizer
 from sklearn.preprocessing import MinMaxScaler
 
 from aliases import PROTEIN_U, PROTEIN_V
-from utils import get_all_cyc_complex_pairs, get_all_cyc_proteins
+from utils import get_all_cyc_proteins, get_cyc_complex_pairs
 
 
 class FeaturePreprocessor:
@@ -39,7 +39,7 @@ class FeaturePreprocessor:
         self, df_composite: pl.DataFrame, features: List[str], class_label: str
     ):
         srs_cyc_proteins = get_all_cyc_proteins()
-        df_co_complex_pairs = get_all_cyc_complex_pairs()
+        df_co_complex_pairs = get_cyc_complex_pairs()
 
         df_pd_composite = (
             df_composite.lazy()

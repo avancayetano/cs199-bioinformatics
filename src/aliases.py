@@ -24,14 +24,16 @@ CO_OCCUR = "CO_OCCUR"  # Co-ocurrence in PubMed literature
 
 GO_SS = "GO_SS"  # average of GO_CC, GO_BP, and GO_MF
 
-# Actual classes of protein pairs.
+FEATURES = [REL, CO_EXP, GO_CC, GO_BP, GO_MF, TOPO, TOPO_L2, STRING, CO_OCCUR]
+
+# Labels of protein pairs
 IS_CO_COMP = "IS_CO_COMP"
 IS_NIP = "IS_NIP"
 
 # Predicted classes probability of protein pairs
-PROB_CO_COMP = "PROB_CO_COMP"  # probability of being a co-complex pair
-PROB_NON_CO_COMP = "PROB_NON_CO_COMP"
-PROB_NIP = "PROB_NIP"  # probability of being a NIP pair; later used as a feature
-PROB_NON_NIP = "PROB_NON_NIP"
+PROBA_CO_COMP = "PROBA_CO_COMP"  # probability of being a co-complex pair
+PROBA_NON_CO_COMP = "PROBA_NON_CO_COMP"
+PROBA_NIP = "PROBA_NIP"  # probability of being a NIP pair; later used as a feature
+PROBA_NON_NIP = "PROBA_NON_NIP"
 
-WEIGHT = "WEIGHT"  # alias for PROB_CO_COMP
+WEIGHT = "WEIGHT"  # alias for PROBA_CO_COMP

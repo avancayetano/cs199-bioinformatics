@@ -17,7 +17,7 @@ def assert_prots_sorted(df: pl.DataFrame):
 
 def assert_df_normalized(df: pl.DataFrame, col: str):
     """
-    Checks if a dataframe column is normalized.
+    Checks if a dataframe column is normalized (between 0 and 1).
 
     Args:
         df (pl.DataFrame): _description_

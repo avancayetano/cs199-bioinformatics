@@ -212,6 +212,9 @@ class CoExpScoring:
             / (pl.col(SCORE).max() - pl.col(SCORE).min())
         ).alias(SCORE)
 
+    def rmse(self, col_a: str, col_b: str) -> pl.Expr:
+        return (pl.col(col_a) - pl.col(col_b)).pow(2).mean().sqrt()
+
     def score(
         self, df_filtered: pl.DataFrame, df_gene_exp: pl.DataFrame
     ) -> pl.DataFrame:

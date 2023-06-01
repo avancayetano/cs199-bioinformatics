@@ -8,6 +8,8 @@ import seaborn as sns
 from aliases import (
     CO_EXP,
     CO_OCCUR,
+    COMPLEX_ID,
+    CROSS_VAL_ITER,
     GO_BP,
     GO_CC,
     GO_MF,
@@ -24,8 +26,8 @@ from aliases import (
 from feature_preprocessor import FeaturePreprocessor
 from utils import (
     construct_composite_network,
-    get_all_cyc_complex_pairs,
     get_all_cyc_proteins,
+    get_cyc_complex_pairs,
 )
 
 
@@ -43,7 +45,6 @@ class ExploratoryDataAnalysis:
         sns.set_palette("deep")
         self.features = features
         self.df_composite = construct_composite_network(features=self.features)
-        print(self.df_composite)
 
         self.feature_preprocessor = FeaturePreprocessor()
 
@@ -77,19 +78,23 @@ class ExploratoryDataAnalysis:
 
     def explore_co_complexes(self):
         plt.figure()
-        srs_cyc_prots = get_all_cyc_proteins()
-        df_relevant = self.df_composite.filter(
-            pl.col(PROTEIN_U).is_in(srs_cyc_prots)
-            & pl.col(PROTEIN_V).is_in(srs_cyc_prots)
-        )
+        # srs_cyc_prots = get_all_cyc_proteins()
+        # df_relevant = self.df_composite.filter(
+        #     pl.col(PROTEIN_U).is_in(srs_cyc_prots)
+        #     & pl.col(PROTEIN_V).is_in(srs_cyc_prots)
+        # )
 
-        df_cmp_pairs = get_all_cyc_complex_pairs().with_columns(
-            pl.lit(1.0).alias(IS_CO_COMP)
-        )
+        # df_cross_val = pl.read_csv("../data/preprocessed/cross_val_table.csv")
+
+        # df_iter_9 = df_cross_val.filter(
+        #     pl.col(f"{CROSS_VAL_ITER}_9") == "train"
+        # ).select(COMPLEX_ID)
+
+        df_cmp_pairs = get_cyc_complex_pairs().with_columns(pl.lit(1).alias(IS_CO_COMP))
 
         df_pd_display = (
-            df_relevant.join(df_cmp_pairs, on=[PROTEIN_U, PROTEIN_V], how="left")
-            .fill_null(pl.lit(0.0))
+            self.df_composite.join(df_cmp_pairs, on=[PROTEIN_U, PROTEIN_V], how="left")
+            .fill_null(pl.lit(0))
             .melt(
                 id_vars=[PROTEIN_U, PROTEIN_V, IS_CO_COMP],
                 variable_name="FEATURE",
@@ -109,22 +114,13 @@ class ExploratoryDataAnalysis:
             "../data/preprocessed/yeast_nips.csv",
             has_header=False,
             new_columns=[PROTEIN_U, PROTEIN_V],
-        ).with_columns(pl.lit(1.0).alias(IS_NIP))
+        ).with_columns(pl.lit(1).alias(IS_NIP))
 
-        srs_nips = (
-            df_nip_pairs.select(pl.col(PROTEIN_U).alias(PROTEIN))
-            .to_series()
-            .append(df_nip_pairs.select(pl.col(PROTEIN_V)).to_series())
-            .unique()
-        )
-
-        df_relevant = self.df_composite.filter(
-            pl.col(PROTEIN_U).is_in(srs_nips) & pl.col(PROTEIN_V).is_in(srs_nips)
-        )
+        df_ppin = self.df_composite.filter(pl.col(TOPO) > 0)
 
         df_pd_display = (
-            df_relevant.join(df_nip_pairs, on=[PROTEIN_U, PROTEIN_V], how="left")
-            .fill_null(pl.lit(0.0))
+            df_ppin.join(df_nip_pairs, on=[PROTEIN_U, PROTEIN_V], how="left")
+            .fill_null(pl.lit(0))
             .melt(
                 id_vars=[PROTEIN_U, PROTEIN_V, IS_NIP],
                 variable_name="FEATURE",
@@ -142,9 +138,9 @@ class ExploratoryDataAnalysis:
             self.df_composite, self.features
         )
         self.describe_features()
-        self.features_heatmap()
-        self.features_dist_hist()
-        self.explore_co_complexes()
+        # self.features_heatmap()
+        # self.features_dist_hist()
+        # self.explore_co_complexes()
         self.explore_nip_pairs()
 
         plt.show()
