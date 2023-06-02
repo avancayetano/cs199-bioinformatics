@@ -30,6 +30,7 @@ from aliases import (
 )
 
 SCORE = WEIGHT
+RESIDUAL = "RESIDUAL"
 
 
 class CoCompClassifier:
@@ -60,20 +61,35 @@ class CoCompClassifier:
             _type_: _description_
         """
 
+        # all proteins in the training complexes
+        srs_proteins = (
+            df_train_pairs.select(pl.col(PROTEIN_U))
+            .to_series()
+            .append(df_train_pairs.select(pl.col(PROTEIN_V)).to_series())
+            .unique()
+            .alias(PROTEIN)
+        )
+
         df_labeled = (
             df_composite.lazy()
+            .filter(
+                pl.col(PROTEIN_U).is_in(srs_proteins)
+                & pl.col(PROTEIN_V).is_in(srs_proteins)
+            )
             .join(
                 df_train_pairs.lazy().with_columns(pl.lit(1).alias(self.label)),
                 on=[PROTEIN_U, PROTEIN_V],
                 how="left",
             )
-            .fill_null(pl.lit(0))
+            .fill_null(0)
             .collect()
         )
 
         return df_labeled
 
-    def equalize_classes(self, df_labeled: pl.DataFrame) -> pl.DataFrame:
+    def equalize_classes(
+        self, df_labeled: pl.DataFrame, xval_iter: int
+    ) -> pl.DataFrame:
         """
         Equalizes the size of the classes of the labeled set.
 
@@ -88,22 +104,22 @@ class CoCompClassifier:
         df_negative = df_labeled.filter(pl.col(self.label) == 0)
 
         if df_positive.shape[0] < df_negative.shape[0]:
-            df_negative = df_negative.sample(df_positive.shape[0], seed=12345)
+            df_negative = df_negative.sample(df_positive.shape[0], seed=xval_iter)
         elif df_positive.shape[0] > df_negative.shape[0]:
-            df_positive = df_positive.sample(df_negative.shape[0], seed=12345)
+            df_positive = df_positive.sample(df_negative.shape[0], seed=xval_iter)
 
         df_labeled = pl.concat([df_positive, df_negative], how="vertical")
 
         return df_labeled
 
-    def weight(self, df_labeled: pl.DataFrame) -> pl.DataFrame:
+    def weight(
+        self, df_composite: pl.DataFrame, df_labeled: pl.DataFrame
+    ) -> pl.DataFrame:
         """
         Uses the learned parameters to weight each protein pair.
 
-        NOTE: same data are used for training and testing.
-        This is what was done by the reference paper (SWC.
-
         Args:
+            df_composite (pl.DataFrame): _description_
             df_labeled (pl.DataFrame): _description_
 
         Returns:
@@ -119,7 +135,7 @@ class CoCompClassifier:
         self.model.fit(X_train, y_train)  # training the model
 
         # After learning the parameters, weight all protein pairs
-        X_test = df_labeled.select(self.features).to_numpy()
+        X_test = df_composite.select(self.features).to_numpy()
         ndarr_pred = self.model.predict_proba(X_test)
 
         CLASS_PROBA = [PROBA_NON_CO_COMP, PROBA_CO_COMP]
@@ -128,16 +144,16 @@ class CoCompClassifier:
             ndarr_pred, schema=[CLASS_PROBA[c] for c in self.model.classes_]
         )
 
-        df_w_composite = pl.concat([df_labeled, df_weights], how="horizontal").select(
-            [PROTEIN_U, PROTEIN_V, self.label, PROBA_NON_CO_COMP, PROBA_CO_COMP]
+        df_w_composite = pl.concat([df_composite, df_weights], how="horizontal").select(
+            [PROTEIN_U, PROTEIN_V, PROBA_NON_CO_COMP, PROBA_CO_COMP]
         )
 
         df_w_composite.write_csv(f"../data/training/{self.name}_probas.csv")
 
         return df_w_composite
 
-    def rmse(self, col_a: str, col_b: str) -> pl.Expr:
-        return (pl.col(col_a) - pl.col(col_b)).pow(2).mean().sqrt()
+    def residual(self, col_a: str, col_b: str) -> pl.Expr:
+        return (pl.col(col_a) - pl.col(col_b)).abs().mean()
 
     def validate(
         self,
@@ -149,6 +165,7 @@ class CoCompClassifier:
 
         lf_test = (
             df_w_composite.lazy()
+            .select(pl.exclude(self.label))
             .join(
                 df_train_pairs.lazy(),
                 on=[PROTEIN_U, PROTEIN_V],
@@ -162,32 +179,43 @@ class CoCompClassifier:
         )
 
         df_test_all = lf_test.fill_null(pl.lit(0)).collect()
-        rmse = df_test_all.select(self.rmse(self.label, PROBA_CO_COMP).alias("RMSE"))
-        print(rmse)
+        residual = df_test_all.select(
+            self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
+        )
+        # print(residual)
 
         print("Compare with co-complex edges only")
         df_test_positive = lf_test.drop_nulls(subset=self.label).collect()
-        rmse = df_test_positive.select(
-            self.rmse(self.label, PROBA_CO_COMP).alias("RMSE")
+        residual = df_test_positive.select(
+            self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
         )
-        print(rmse)
+        # print(residual)
 
         print("Validating vs the whole reference complexes set (actual class)...")
         df_cmp_pairs = pl.concat(
             [df_train_pairs, df_test_pairs], how="vertical"
         ).unique(maintain_order=True)
 
-        lf = df_w_composite.lazy().join(
-            df_cmp_pairs.lazy().with_columns(pl.lit(1).alias(self.label)),
-            on=[PROTEIN_U, PROTEIN_V],
-            how="left",
+        lf = (
+            df_w_composite.lazy()
+            .select(pl.exclude(self.label))
+            .join(
+                df_cmp_pairs.lazy().with_columns(pl.lit(1).alias(self.label)),
+                on=[PROTEIN_U, PROTEIN_V],
+                how="left",
+            )
         )
 
         df_all = lf.fill_null(pl.lit(0)).collect()
-        rmse = df_all.select(self.rmse(self.label, PROBA_CO_COMP).alias("RMSE"))
-        print(rmse)
+        residual = df_all.select(
+            self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
+        )
+        # print(residual)
 
         print("Compare with co-complex edges only")
+
         df_positive = lf.drop_nulls(subset=self.label).collect()
-        rmse = df_positive.select(self.rmse(self.label, PROBA_CO_COMP).alias("RMSE"))
-        print(rmse)
+        residual = df_positive.select(
+            self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
+        )
+        print(residual)

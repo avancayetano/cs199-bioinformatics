@@ -22,8 +22,8 @@ SWC data is old (2011 data). However, you might have noticed that I used more mo
         - out.{file}.I40
       - features/
         - out.{file}.I40
-    - top_20k_edges/
-      - cross_val/ - includes scores from swc/top_20k_edges/cross_val
+    - 20k_edges/
+      - cross_val/ - includes scores from swc/20k_edges/cross_val
         - out.{file}.I40
       - features/
         - out.{file}.I40
@@ -50,7 +50,7 @@ SWC data is old (2011 data). However, you might have noticed that I used more mo
     - all_edges/
       - cross_val/
         - swc_weighted scored_edges iter{n}.txt
-    - top_20k_edges/
+    - 20k_edges/
       - cross_val/
         - swc_weighted_20k scored_edges iter{n}.txt
     - complexes_CYC.txt
@@ -65,7 +65,7 @@ SWC data is old (2011 data). However, you might have noticed that I used more mo
         - {model}\_{feats}\_iter{n}.csv
       - features/ (TODO: could possibly add combinations of features as well (by averaging))
         - {FEATURE}.csv
-    - top_20k_edges/
+    - 20k_edges/
       - cross_val/
         - {model}\_20k_iter{n}.csv
         - {model}\_pca_20k_iter{n}.csv
