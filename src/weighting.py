@@ -52,46 +52,9 @@ class FeatureWeighting:
         return df_w_composite
 
 
-class RFWeighting(CoCompClassifier):
-    def __init__(
-        self,
-        features: List[str],
-        model: RandomForestClassifier,
-        name: str,
-    ):
-        super().__init__(features, model, name)
-
-    def main(
-        self, df_composite: pl.DataFrame, features: List[str], name: str
-    ) -> pl.DataFrame:
-        df_train_pairs, df_test_pairs = get_cyc_train_test_comp_pairs(i)
-
-        df_labeled = rf.label_composite(df_composite, df_train_pairs)
-        df_labeled = rf.equalize_classes(df_labeled, i)
-
-        df_w_composite = rf.weight(df_composite, df_labeled)
-        rf.validate(df_w_composite, df_train_pairs, df_test_pairs)
-
-        df_check = df_labeled.join(
-            df_w_composite, on=[PROTEIN_U, PROTEIN_V], how="left"
-        ).select([PROTEIN_U, PROTEIN_V, PROBA_NON_CO_COMP, PROBA_CO_COMP, IS_CO_COMP])
-
-        print(df_check)
-
-        df_w_composite = df_w_composite.rename({PROBA_CO_COMP: WEIGHT}).select(
-            [PROTEIN_U, PROTEIN_V, WEIGHT]
-        )
-
-        df_w_composite.write_csv(
-            f"../data/weighted/all_edges/cross_val/{rf.name}_iter{i}.csv",
-            has_header=False,
-            separator="\t",
-        )
-
-
 if __name__ == "__main__":
-    pl.Config.set_tbl_cols(40)
-    pl.Config.set_tbl_rows(7)
+    # pl.Config.set_tbl_cols(40)
+    pl.Config.set_tbl_rows(20)
 
     df_composite = construct_composite_network()
 
@@ -102,7 +65,7 @@ if __name__ == "__main__":
         print(f"FEATURE: {f}")
         print(df_f_weighted)
         assert_df_normalized(df_f_weighted, WEIGHT)
-    print("------------- END: FEATURE WEIGHTING ----------------------")
+    print("------------- END: FEATURE WEIGHTING ----------------------\n\n")
 
     print("------------- BEGIN: SUPER FEATURE WEIGHTING ----------------------")
     for f in SUPER_FEATS:
@@ -110,42 +73,45 @@ if __name__ == "__main__":
         print(f"FEATURE: {f}")
         print(df_f_weighted)
         assert_df_normalized(df_f_weighted, WEIGHT)
-    print("------------- END: SUPER FEATURE WEIGHTING ----------------------")
+    print("------------- END: SUPER FEATURE WEIGHTING ----------------------\n\n")
 
     print("------------- BEGIN: SUPERVISED WEIGHTING ----------------------")
-    iters = 10
-    print(f"CROSS-VALIDATION ITERATIONS: {iters}")
+    n_iters = 10
+    print(f"CROSS-VALIDATION ITERATIONS: {n_iters}")
 
-    # feature_prep = ModelPreprocessor()
-    # rf = CoCompClassifier(features, RandomForestClassifier(), "rf")
-    # cnb = CoCompClassifier(features, CategoricalNB(), "cnb")
+    model_prep = ModelPreprocessor()
+    df_composite = model_prep.normalize_features(df_composite, FEATURES)
 
-    # df_composite = feature_prep.normalize_features(df_composite, features)
+    # Weighting Models
+    rf = CoCompClassifier(FEATURES, RandomForestClassifier(), "rf")
+    cnb = CoCompClassifier(FEATURES, CategoricalNB(), "cnb")
 
-    # for i in range(iters):
-    #     print(f"------------------- BEGIN: ITER {i} ---------------------")
-    #     df_train_pairs, df_test_pairs = get_cyc_train_test_comp_pairs(i)
+    for xval_iter in range(n_iters):
+        print(f"------------------- BEGIN: ITER {xval_iter} ---------------------\n")
+        df_train_pairs, df_test_pairs = get_cyc_train_test_comp_pairs(xval_iter)
+        df_labeled = model_prep.label_composite(
+            df_composite, df_train_pairs, IS_CO_COMP, xval_iter
+        )
+        df_composite_binned = model_prep.discretize_composite(
+            df_composite, df_labeled, FEATURES, IS_CO_COMP, xval_iter
+        )
 
-    #     df_labeled = rf.label_composite(df_composite, df_train_pairs)
-    #     df_labeled = rf.equalize_classes(df_labeled, i)
+        df_w_rf = rf.main(
+            df_composite, df_labeled, df_train_pairs, df_test_pairs, xval_iter
+        )
+        df_w_cnb = cnb.main(
+            df_composite_binned, df_labeled, df_train_pairs, df_test_pairs, xval_iter
+        )
 
-    #     df_w_composite = rf.weight(df_composite, df_labeled)
-    #     rf.validate(df_w_composite, df_train_pairs, df_test_pairs)
+        df_w_rf.write_csv(
+            f"../data/weighted/all_edges/cross_val/{rf.name}_iter{xval_iter}.csv",
+            has_header=False,
+            separator="\t",
+        )
+        df_w_cnb.write_csv(
+            f"../data/weighted/all_edges/cross_val/{cnb.name}_iter{xval_iter}.csv",
+            has_header=False,
+            separator="\t",
+        )
 
-    #     df_check = df_labeled.join(
-    #         df_w_composite, on=[PROTEIN_U, PROTEIN_V], how="left"
-    #     ).select([PROTEIN_U, PROTEIN_V, PROBA_NON_CO_COMP, PROBA_CO_COMP, IS_CO_COMP])
-
-    #     print(df_check)
-
-    #     df_w_composite = df_w_composite.rename({PROBA_CO_COMP: WEIGHT}).select(
-    #         [PROTEIN_U, PROTEIN_V, WEIGHT]
-    #     )
-
-    #     df_w_composite.write_csv(
-    #         f"../data/weighted/all_edges/cross_val/{rf.name}_iter{i}.csv",
-    #         has_header=False,
-    #         separator="\t",
-    #     )
-
-    #     print(f"------------------- END: ITER {i} ---------------------")
+        print(f"------------------- END: ITER {xval_iter} ---------------------")

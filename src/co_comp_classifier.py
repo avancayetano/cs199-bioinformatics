@@ -10,14 +10,14 @@ from aliases import (
     PROBA_NON_CO_COMP,
     PROTEIN_U,
     PROTEIN_V,
+    WEIGHT,
     WeightingModel,
 )
-from model_preprocessor import ModelPreprocessor
 
 RESIDUAL = "RESIDUAL"
 
 
-class CoCompClassifier(ModelPreprocessor):
+class CoCompClassifier:
     """
     Co-complex classifier.
     """
@@ -28,7 +28,6 @@ class CoCompClassifier(ModelPreprocessor):
         model: WeightingModel,
         name: str,
     ):
-        super().__init__()
         self.features = features
         self.label = IS_CO_COMP
         self.model = model
@@ -49,8 +48,11 @@ class CoCompClassifier(ModelPreprocessor):
         """
 
         print(">>> Weighting")
-        X_train = df_labeled.select(self.features).to_numpy()
-        y_train = df_labeled.select(self.label).to_numpy().ravel()
+        df_feat_label = df_labeled.join(
+            df_composite, on=[PROTEIN_U, PROTEIN_V], how="left"
+        )
+        X_train = df_feat_label.select(self.features).to_numpy()
+        y_train = df_feat_label.select(self.label).to_numpy().ravel()
 
         print("Training the model...")
         print(f"Number of training samples: {X_train.shape[0]}")
@@ -151,3 +153,35 @@ class CoCompClassifier(ModelPreprocessor):
             self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
         )
         print(residual)
+
+    def main(
+        self,
+        df_composite: pl.DataFrame,
+        df_labeled: pl.DataFrame,
+        df_train_pairs: pl.DataFrame,
+        df_test_pairs: pl.DataFrame,
+        xval_iter: int,
+    ) -> pl.DataFrame:
+        df_w_composite = self.weight(df_composite, df_labeled, xval_iter)
+        # self.validate(df_w_composite, df_train_pairs, df_test_pairs)
+
+        print(f"{self.name}...")
+        df_check = df_labeled.join(
+            df_w_composite,
+            on=[PROTEIN_U, PROTEIN_V],
+            how="left",
+        ).select([PROTEIN_U, PROTEIN_V, PROBA_NON_CO_COMP, PROBA_CO_COMP, IS_CO_COMP])
+
+        print(df_check.sample(fraction=1.0, shuffle=True))
+
+        df_w_composite = df_w_composite.rename({PROBA_CO_COMP: WEIGHT}).select(
+            [PROTEIN_U, PROTEIN_V, WEIGHT]
+        )
+
+        df_w_composite.write_csv(
+            f"../data/weighted/all_edges/cross_val/{self.name}_iter{xval_iter}.csv",
+            has_header=False,
+            separator="\t",
+        )
+
+        return df_w_composite

@@ -1,6 +1,8 @@
 # pyright: basic
 
-from typing import List, Literal, Union
+import os
+import pprint
+from typing import Dict, List, Literal, Union
 
 import polars as pl
 from imodels.discretization.mdlp import MDLPDiscretizer
@@ -36,35 +38,79 @@ class ModelPreprocessor:
 
         return df_composite
 
-    def discretize_features(
-        self, df_composite: pl.DataFrame, features: List[str], class_label: str
+    def learn_discretization(
+        self,
+        df_composite: pl.DataFrame,
+        df_labeled: pl.DataFrame,
+        features: List[str],
+        label: str,
+        xval_iter: int,
     ):
-        srs_cyc_proteins = get_all_cyc_proteins()
-        df_co_comp_pairs = get_cyc_comp_pairs()
-
-        df_pd_composite = (
-            df_composite.lazy()
-            .filter(
-                pl.col(PROTEIN_U).is_in(srs_cyc_proteins)
-                & pl.col(PROTEIN_V).is_in(srs_cyc_proteins)
-            )
-            .join(
-                df_co_comp_pairs.lazy().with_columns(pl.lit(True).alias(class_label)),
-                on=[PROTEIN_U, PROTEIN_V],
-                how="left",
-            )
-            .fill_null(False)
-            .collect()
-            .to_pandas()
+        # if not os.path.exists(f"../data/training/discretized_data_iter{xval_iter}.csv"):
+        df_feat_label = df_labeled.join(
+            df_composite, on=[PROTEIN_U, PROTEIN_V], how="left"
         )
-
         MDLPDiscretizer(
-            df_pd_composite,
-            class_label=class_label,
+            df_feat_label.to_pandas(),
+            class_label=label,
             features=features,
-            out_path_data="../data/ml_data/discretized_data.csv",
-            out_path_bins="../data/ml_data/discretized_bins.csv",
+            out_path_data=f"../data/training/discretized_data_iter{xval_iter}.csv",
+            out_path_bins=f"../data/training/discretized_bins_iter{xval_iter}.csv",
         )
+
+    def discretize_composite(
+        self,
+        df_composite: pl.DataFrame,
+        df_labeled: pl.DataFrame,
+        features: List[str],
+        label: str,
+        xval_iter: int,
+    ) -> pl.DataFrame:
+        self.learn_discretization(df_composite, df_labeled, features, label, xval_iter)
+        cuts = self.get_cuts(xval_iter)
+        print("CUTS")
+        pprint.pprint(cuts)
+
+        df_composite_binned = df_composite
+        for f in features:
+            cut_labels = ["0"] + [str(idx + 1) for idx, _ in enumerate(cuts[f])]
+
+            df_cut = (
+                df_composite.select(pl.col(f))
+                .to_series()
+                .unique()
+                .cut(cuts[f], labels=cut_labels)
+                .select(
+                    [pl.col(f), pl.col("category").cast(pl.UInt64).alias(f"{f}_BINNED")]
+                )
+            )
+
+            df_composite_binned = df_composite_binned.join(df_cut, on=f, how="left")
+
+        df_composite_binned = df_composite_binned.select(pl.exclude(features)).rename(
+            {f"{f}_BINNED": f for f in features}
+        )
+
+        return df_composite_binned
+
+    def get_cuts(self, xval_iter: int) -> Dict[str, List[float]]:
+        bins: Dict[str, List[float]] = {}
+        feature = ""
+        with open(f"../data/training/discretized_bins_iter{xval_iter}.csv") as file:
+            lines = file.readlines()[1:]
+            for line in lines:
+                line = line.strip()
+                if line.startswith("attr: "):
+                    feature = line.replace("attr: ", "")
+                    continue
+                else:
+                    cuts = [
+                        float(interval.split("_to_")[1])
+                        for interval in line.split(", ")
+                    ][:-1]
+                    bins[feature] = cuts
+
+        return bins
 
     def label_composite(
         self,
@@ -102,6 +148,7 @@ class ModelPreprocessor:
                 how="left",
             )
             .fill_null(0)
+            .select([PROTEIN_U, PROTEIN_V, label])
             .collect()
         )
 
