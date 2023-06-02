@@ -1,24 +1,19 @@
 # pyright: basic
 
-from typing import List, Literal, Optional, Set, Union
+from typing import List, Union
 
 import polars as pl
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.naive_bayes import CategoricalNB
-from sklearn.neural_network import MLPClassifier
 
 from aliases import (
     IS_CO_COMP,
     PROBA_CO_COMP,
     PROBA_NON_CO_COMP,
-    PROTEIN,
     PROTEIN_U,
     PROTEIN_V,
-    WEIGHT,
+    WeightingModel,
 )
 from model_preprocessor import ModelPreprocessor
 
-SCORE = WEIGHT
 RESIDUAL = "RESIDUAL"
 
 
@@ -30,9 +25,10 @@ class CoCompClassifier(ModelPreprocessor):
     def __init__(
         self,
         features: List[str],
-        model: Union[CategoricalNB, RandomForestClassifier, MLPClassifier],
+        model: WeightingModel,
         name: str,
     ):
+        super().__init__()
         self.features = features
         self.label = IS_CO_COMP
         self.model = model
@@ -75,7 +71,7 @@ class CoCompClassifier(ModelPreprocessor):
         )
 
         df_w_composite.write_csv(
-            f"../data/training/{self.name}_probas_iter{xval_iter}.csv"
+            f"../data/training/{self.name.lower()}_probas_iter{xval_iter}.csv"
         )
 
         return df_w_composite
@@ -84,6 +80,14 @@ class CoCompClassifier(ModelPreprocessor):
         return (pl.col(col_a) - pl.col(col_b)).abs().mean()
 
     def validate(
+        self,
+        df_w_composite: pl.DataFrame,
+        df_train_pairs: pl.DataFrame,
+        df_test_pairs: pl.DataFrame,
+    ):
+        pass
+
+    def validate_legacy(
         self,
         df_w_composite: pl.DataFrame,
         df_train_pairs: pl.DataFrame,

@@ -1,3 +1,9 @@
+from typing import List, TypedDict, Union
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.naive_bayes import CategoricalNB
+from sklearn.neural_network import MLPClassifier
+
 PROTEIN_U = "PROTEIN_U"
 PROTEIN_V = "PROTEIN_V"
 PUBMED = "PUBMED"
@@ -22,9 +28,33 @@ TOPO_L2 = "TOPO_L2"  # Topological weighting - Iterative AdjustCD (k=2) Level-2 
 STRING = "STRING"  # STRING database score
 CO_OCCUR = "CO_OCCUR"  # Co-ocurrence in PubMed literature
 
-GO_SS = "GO_SS"  # average of GO_CC, GO_BP, and GO_MF
 
 FEATURES = [TOPO, TOPO_L2, STRING, CO_OCCUR, REL, CO_EXP, GO_CC, GO_BP, GO_MF]
+
+# Super features (for unsupervised weighting)
+# Simple average of features subset
+SuperFeature = TypedDict("SuperFeature", {"name": str, "features": List[str]})
+ALL: SuperFeature = {"name": "ALL", "features": FEATURES}
+GO_SS: SuperFeature = {"name": "GO_SS", "features": [GO_CC, GO_BP, GO_MF]}
+TOPOS: SuperFeature = {"name": "TOPOS", "features": [TOPO, TOPO_L2]}
+ASSOC: SuperFeature = {"name": "ASSOC", "features": [STRING, CO_OCCUR, REL, CO_EXP]}
+TOPO_GO: SuperFeature = {"name": "TOPO_GO", "features": [TOPO, GO_CC, GO_BP, GO_MF]}
+TOPO_CO_EXP: SuperFeature = {"name": "TOPO_CO_EXP", "features": [TOPO, CO_EXP]}
+TOPO_GO_CO_EXP: SuperFeature = {
+    "name": "TOPO_GO_CO_EXP",
+    "features": [TOPO, GO_CC, GO_BP, GO_MF, CO_EXP],
+}
+
+SUPER_FEATS = [
+    ALL,
+    GO_SS,
+    TOPOS,
+    ASSOC,
+    TOPO_GO,
+    TOPO_CO_EXP,
+    TOPO_CO_EXP,
+    TOPO_GO_CO_EXP,
+]
 
 # Labels of protein pairs
 IS_CO_COMP = "IS_CO_COMP"
@@ -37,3 +67,6 @@ PROBA_NIP = "PROBA_NIP"  # probability of being a NIP pair; later used as a feat
 PROBA_NON_NIP = "PROBA_NON_NIP"
 
 WEIGHT = "WEIGHT"  # alias for PROBA_CO_COMP
+
+
+WeightingModel = Union[RandomForestClassifier, CategoricalNB, MLPClassifier]
