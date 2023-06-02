@@ -9,6 +9,10 @@
 - iRefIndex - version 19.0 (2022-08-22) - this is for the PUBMED IDs only (for `REL` feature)
 - Negatome 2.0 - combined, stringent version (mid-2013)
 
+### Possibility
+
+- DIP network (smaller network)
+
 #### Use of modern data
 
 SWC data is old (2011 data). However, you might have noticed that I used more modern data for the new features I introduced. This is because the goal of this study is to extend SWC to use more modern features (aside from improving the machine learning model).

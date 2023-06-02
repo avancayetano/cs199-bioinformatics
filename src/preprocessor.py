@@ -5,15 +5,15 @@ import polars as pl
 
 from aliases import (
     CO_OCCUR,
-    COMPLEX_ID,
-    COMPLEX_PROTEINS,
-    CROSS_VAL_ITER,
+    COMP_ID,
+    COMP_PROTEINS,
     PROTEIN_U,
     PROTEIN_V,
     PUBMED,
     STRING,
     TOPO,
     TOPO_L2,
+    XVAL_ITER,
 )
 from assertions import assert_prots_sorted
 from utils import get_all_cyc_complexes, sort_prot_cols
@@ -155,21 +155,21 @@ class Preprocessor:
                 output += f"{complex_id}\n"
 
                 if complex_id in cross_val:
-                    cross_val[complex_id].append(f"{CROSS_VAL_ITER}_{i}")
+                    cross_val[complex_id].append(f"{XVAL_ITER}_{i}")
                 else:
-                    cross_val[complex_id] = [f"{CROSS_VAL_ITER}_{i}"]
+                    cross_val[complex_id] = [f"{XVAL_ITER}_{i}"]
         output = output.strip()
 
         return output, cross_val
 
     def cross_val_to_df(self, k: int, cross_val: Dict[int, List[str]]) -> pl.DataFrame:
         CrossValDict = TypedDict(
-            "CrossValDict", {"COMPLEX_ID": List[int], "ITERS": List[List[str]]}
+            "CrossValDict", {"COMP_ID": List[int], "ITERS": List[List[str]]}
         )
-        cross_val_dict: CrossValDict = {COMPLEX_ID: [], "ITERS": []}
+        cross_val_dict: CrossValDict = {COMP_ID: [], "ITERS": []}
 
         for complex_id in cross_val:
-            cross_val_dict[COMPLEX_ID].append(complex_id)
+            cross_val_dict[COMP_ID].append(complex_id)
             cross_val_dict["ITERS"].append(cross_val[complex_id])
 
         df_cross_val = (
@@ -179,21 +179,19 @@ class Preprocessor:
             .collect()
             .pivot(
                 values="VALUES",
-                index=COMPLEX_ID,
+                index=COMP_ID,
                 columns="ITERS",
                 aggregate_function="first",
             )
             .lazy()
             .join(
-                df_complexes.lazy().select(pl.col(COMPLEX_ID)),
-                on=COMPLEX_ID,
+                df_complexes.lazy().select(pl.col(COMP_ID)),
+                on=COMP_ID,
                 how="outer",
             )
             .fill_null(pl.lit("train"))
-            .sort(pl.col(COMPLEX_ID))
-            .select(
-                [COMPLEX_ID] + list(sorted([f"{CROSS_VAL_ITER}_{i}" for i in range(k)]))
-            )
+            .sort(pl.col(COMP_ID))
+            .select([COMP_ID] + list(sorted([f"{XVAL_ITER}_{i}" for i in range(k)])))
             .collect()
         )
         return df_cross_val
@@ -214,8 +212,8 @@ class Preprocessor:
         """
 
         list_large_complexes: List[int] = (
-            df_complexes.filter(pl.col(COMPLEX_PROTEINS).list.lengths() > 3)
-            .select(pl.col(COMPLEX_ID))
+            df_complexes.filter(pl.col(COMP_PROTEINS).list.lengths() > 3)
+            .select(pl.col(COMP_ID))
             .to_series()
             .shuffle(seed=12345)
             .to_list()

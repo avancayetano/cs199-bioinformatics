@@ -18,11 +18,10 @@ output_dir="../data/clusters/"
 
 TEMP="$IFS"
 IFS=$'\n'
-for file in `find "$input_dir" -iregex ".*\.\(csv\|txt\)$"`
-do
-    odir=`echo "$file" | perl -nle 'm/(.+)\/.+\.((txt)|(csv))$/; print $1'`
+for file in $(find "$input_dir" -iregex ".*\.\(csv\|txt\)$"); do
+    odir=$(echo "$file" | perl -nle 'm/(.+)\/.+\.((txt)|(csv))$/; print $1')
     odir=$output_dir${odir#"$parent_dir"}
-    `~/local/bin/mcl "$file" --abc -I "$inflation" -odir "$odir"`
+    $(~/local/bin/mcl "$file" --abc -I "$inflation" -odir "$odir")
     echo "--------------------- DONE CLUSTERING ------------------------------"
 done
 IFS="$TEMP"

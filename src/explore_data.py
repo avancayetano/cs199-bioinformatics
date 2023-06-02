@@ -5,35 +5,14 @@ import matplotlib.pyplot as plt
 import polars as pl
 import seaborn as sns
 
-from aliases import (
-    CO_EXP,
-    CO_OCCUR,
-    COMPLEX_ID,
-    CROSS_VAL_ITER,
-    GO_BP,
-    GO_CC,
-    GO_MF,
-    IS_CO_COMP,
-    IS_NIP,
-    PROTEIN,
-    PROTEIN_U,
-    PROTEIN_V,
-    REL,
-    STRING,
-    TOPO,
-    TOPO_L2,
-)
-from feature_preprocessor import FeaturePreprocessor
-from utils import (
-    construct_composite_network,
-    get_all_cyc_proteins,
-    get_cyc_complex_pairs,
-)
+from aliases import FEATURES, IS_CO_COMP, IS_NIP, PROTEIN_U, PROTEIN_V
+from model_preprocessor import ModelPreprocessor
+from utils import construct_composite_network, get_cyc_comp_pairs
 
 
 class ExploratoryDataAnalysis:
     """
-    Exploratory Data Analysis
+    Exploratory Data Analysis.
 
     - [X] Heatmap of features correlation
     - [X] Distribution of each feature
@@ -45,11 +24,7 @@ class ExploratoryDataAnalysis:
         sns.set_palette("deep")
         self.features = features
         self.df_composite = construct_composite_network(features=self.features)
-
-        self.feature_preprocessor = FeaturePreprocessor()
-
-    def describe_features(self):
-        print(self.df_composite.select(self.features).describe())
+        self.model_prep = ModelPreprocessor()
 
     def features_heatmap(self):
         plt.figure()
@@ -78,71 +53,61 @@ class ExploratoryDataAnalysis:
 
     def explore_co_complexes(self):
         plt.figure()
-        # srs_cyc_prots = get_all_cyc_proteins()
-        # df_relevant = self.df_composite.filter(
-        #     pl.col(PROTEIN_U).is_in(srs_cyc_prots)
-        #     & pl.col(PROTEIN_V).is_in(srs_cyc_prots)
-        # )
+        label = IS_CO_COMP
 
-        # df_cross_val = pl.read_csv("../data/preprocessed/cross_val_table.csv")
-
-        # df_iter_9 = df_cross_val.filter(
-        #     pl.col(f"{CROSS_VAL_ITER}_9") == "train"
-        # ).select(COMPLEX_ID)
-
-        df_cmp_pairs = get_cyc_complex_pairs().with_columns(pl.lit(1).alias(IS_CO_COMP))
-
-        df_pd_display = (
-            self.df_composite.join(df_cmp_pairs, on=[PROTEIN_U, PROTEIN_V], how="left")
-            .fill_null(pl.lit(0))
-            .melt(
-                id_vars=[PROTEIN_U, PROTEIN_V, IS_CO_COMP],
-                variable_name="FEATURE",
-                value_name="VALUE",
-            )
-            .to_pandas()
+        df_comp_pairs = get_cyc_comp_pairs()
+        df_labeled = self.model_prep.label_composite(
+            self.df_composite,
+            df_comp_pairs,
+            label,
         )
 
-        ax = sns.barplot(data=df_pd_display, x="FEATURE", y="VALUE", hue=IS_CO_COMP)
+        df_pd_display = df_labeled.melt(
+            id_vars=[PROTEIN_U, PROTEIN_V, label],
+            variable_name="FEATURE",
+            value_name="VALUE",
+        ).to_pandas()
+
+        ax = sns.barplot(data=df_pd_display, x="FEATURE", y="VALUE", hue=label)
         ax.set_title(
             "Mean feature values of co-complex and non-co-complex protein pairs."
         )
 
     def explore_nip_pairs(self):
         plt.figure()
+        label = IS_NIP
+
         df_nip_pairs = pl.read_csv(
             "../data/preprocessed/yeast_nips.csv",
             has_header=False,
             new_columns=[PROTEIN_U, PROTEIN_V],
-        ).with_columns(pl.lit(1).alias(IS_NIP))
-
-        df_ppin = self.df_composite.filter(pl.col(TOPO) > 0)
-
-        df_pd_display = (
-            df_ppin.join(df_nip_pairs, on=[PROTEIN_U, PROTEIN_V], how="left")
-            .fill_null(pl.lit(0))
-            .melt(
-                id_vars=[PROTEIN_U, PROTEIN_V, IS_NIP],
-                variable_name="FEATURE",
-                value_name="VALUE",
-            )
-            .to_pandas()
         )
+        df_labeled = self.model_prep.label_composite(
+            self.df_composite,
+            df_nip_pairs,
+            label,
+            mode="all",
+            balanced=False,
+        )
+        df_pd_display = df_labeled.melt(
+            id_vars=[PROTEIN_U, PROTEIN_V, label],
+            variable_name="FEATURE",
+            value_name="VALUE",
+        ).to_pandas()
 
-        ax = sns.barplot(data=df_pd_display, x="FEATURE", y="VALUE", hue=IS_NIP)
+        ax = sns.barplot(data=df_pd_display, x="FEATURE", y="VALUE", hue=label)
         ax.set_title("Mean feature values of NIP and non-NIP pairs.")
 
     def main(self):
-        self.describe_features()
-        self.df_composite = self.feature_preprocessor.normalize_features(
+        print(self.df_composite.select(self.features).describe())
+        self.df_composite = self.model_prep.normalize_features(
             self.df_composite, self.features
         )
-        self.describe_features()
-        # self.features_heatmap()
-        # self.features_dist_hist()
-        # self.explore_co_complexes()
+        print(self.df_composite.select(self.features).describe())
+        self.features_heatmap()
+        self.features_dist_hist()
+        self.explore_co_complexes()
         self.explore_nip_pairs()
-
         plt.show()
 
 
@@ -150,6 +115,6 @@ if __name__ == "__main__":
     pl.Config.set_tbl_cols(40)
     pl.Config.set_tbl_rows(7)
 
-    features = [TOPO, TOPO_L2, STRING, CO_OCCUR, REL, CO_EXP, GO_CC, GO_BP, GO_MF]
+    features = FEATURES
     eda = ExploratoryDataAnalysis(features)
     eda.main()

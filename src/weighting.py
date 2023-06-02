@@ -14,8 +14,8 @@ from aliases import (
     WEIGHT,
 )
 from co_comp_classifier import CoCompClassifier
-from feature_preprocessor import FeaturePreprocessor
-from utils import construct_composite_network, get_cyc_train_test_cmp_pairs
+from model_preprocessor import ModelPreprocessor
+from utils import construct_composite_network, get_cyc_train_test_comp_pairs
 
 if __name__ == "__main__":
     pl.Config.set_tbl_cols(40)
@@ -24,7 +24,7 @@ if __name__ == "__main__":
     features = FEATURES
     iters = 10
 
-    feature_prep = FeaturePreprocessor()
+    feature_prep = ModelPreprocessor()
     rf = CoCompClassifier(features, RandomForestClassifier(n_estimators=500), "rf")
     cnb = CoCompClassifier(features, CategoricalNB(), "cnb")
 
@@ -33,7 +33,7 @@ if __name__ == "__main__":
 
     for i in range(iters):
         print(f"------------------- BEGIN: ITER {i} ---------------------")
-        df_train_pairs, df_test_pairs = get_cyc_train_test_cmp_pairs(i)
+        df_train_pairs, df_test_pairs = get_cyc_train_test_comp_pairs(i)
 
         df_labeled = rf.label_composite(df_composite, df_train_pairs)
         df_labeled = rf.equalize_classes(df_labeled, i)

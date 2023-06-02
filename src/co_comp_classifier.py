@@ -1,6 +1,6 @@
 # pyright: basic
 
-from typing import List, Optional, Set, Union
+from typing import List, Literal, Optional, Set, Union
 
 import polars as pl
 from sklearn.ensemble import RandomForestClassifier
@@ -8,32 +8,21 @@ from sklearn.naive_bayes import CategoricalNB
 from sklearn.neural_network import MLPClassifier
 
 from aliases import (
-    CO_EXP,
-    CO_OCCUR,
-    GO_BP,
-    GO_CC,
-    GO_MF,
     IS_CO_COMP,
-    IS_NIP,
     PROBA_CO_COMP,
-    PROBA_NIP,
     PROBA_NON_CO_COMP,
-    PROBA_NON_NIP,
     PROTEIN,
     PROTEIN_U,
     PROTEIN_V,
-    REL,
-    STRING,
-    TOPO,
-    TOPO_L2,
     WEIGHT,
 )
+from model_preprocessor import ModelPreprocessor
 
 SCORE = WEIGHT
 RESIDUAL = "RESIDUAL"
 
 
-class CoCompClassifier:
+class CoCompClassifier(ModelPreprocessor):
     """
     Co-complex classifier.
     """
@@ -49,74 +38,11 @@ class CoCompClassifier:
         self.model = model
         self.name = name
 
-    def label_composite(self, df_composite: pl.DataFrame, df_train_pairs: pl.DataFrame):
-        """
-        Labels the PPIN subset.
-
-        Args:
-            df_composite (pl.DataFrame): _description_
-            df_train_pairs (pl.DataFrame): _description_
-
-        Returns:
-            _type_: _description_
-        """
-
-        # all proteins in the training complexes
-        srs_proteins = (
-            df_train_pairs.select(pl.col(PROTEIN_U))
-            .to_series()
-            .append(df_train_pairs.select(pl.col(PROTEIN_V)).to_series())
-            .unique()
-            .alias(PROTEIN)
-        )
-
-        df_labeled = (
-            df_composite.lazy()
-            .filter(
-                pl.col(PROTEIN_U).is_in(srs_proteins)
-                & pl.col(PROTEIN_V).is_in(srs_proteins)
-            )
-            .join(
-                df_train_pairs.lazy().with_columns(pl.lit(1).alias(self.label)),
-                on=[PROTEIN_U, PROTEIN_V],
-                how="left",
-            )
-            .fill_null(0)
-            .collect()
-        )
-
-        return df_labeled
-
-    def equalize_classes(
-        self, df_labeled: pl.DataFrame, xval_iter: int
-    ) -> pl.DataFrame:
-        """
-        Equalizes the size of the classes of the labeled set.
-
-        Args:
-            df_labeled (pl.DataFrame): _description_
-
-        Returns:
-            pl.DataFrame: _description_
-        """
-
-        df_positive = df_labeled.filter(pl.col(self.label) == 1)
-        df_negative = df_labeled.filter(pl.col(self.label) == 0)
-
-        if df_positive.shape[0] < df_negative.shape[0]:
-            df_negative = df_negative.sample(df_positive.shape[0], seed=xval_iter)
-        elif df_positive.shape[0] > df_negative.shape[0]:
-            df_positive = df_positive.sample(df_negative.shape[0], seed=xval_iter)
-
-        df_labeled = pl.concat([df_positive, df_negative], how="vertical")
-
-        return df_labeled
-
     def weight(
-        self, df_composite: pl.DataFrame, df_labeled: pl.DataFrame
+        self, df_composite: pl.DataFrame, df_labeled: pl.DataFrame, xval_iter: int
     ) -> pl.DataFrame:
         """
-        Uses the learned parameters to weight each protein pair.
+        Weight composite network based on the labeled data.
 
         Args:
             df_composite (pl.DataFrame): _description_
@@ -148,7 +74,9 @@ class CoCompClassifier:
             [PROTEIN_U, PROTEIN_V, PROBA_NON_CO_COMP, PROBA_CO_COMP]
         )
 
-        df_w_composite.write_csv(f"../data/training/{self.name}_probas.csv")
+        df_w_composite.write_csv(
+            f"../data/training/{self.name}_probas_iter{xval_iter}.csv"
+        )
 
         return df_w_composite
 
@@ -192,7 +120,7 @@ class CoCompClassifier:
         # print(residual)
 
         print("Validating vs the whole reference complexes set (actual class)...")
-        df_cmp_pairs = pl.concat(
+        df_comp_pairs = pl.concat(
             [df_train_pairs, df_test_pairs], how="vertical"
         ).unique(maintain_order=True)
 
@@ -200,7 +128,7 @@ class CoCompClassifier:
             df_w_composite.lazy()
             .select(pl.exclude(self.label))
             .join(
-                df_cmp_pairs.lazy().with_columns(pl.lit(1).alias(self.label)),
+                df_comp_pairs.lazy().with_columns(pl.lit(1).alias(self.label)),
                 on=[PROTEIN_U, PROTEIN_V],
                 how="left",
             )

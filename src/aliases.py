@@ -3,11 +3,11 @@ PROTEIN_V = "PROTEIN_V"
 PUBMED = "PUBMED"
 PROTEIN = "PROTEIN"
 
-COMPLEX_ID = "COMPLEX_ID"
-COMPLEX_PROTEINS = "COMPLEX_PROTEINS"
-COMPLEX_DESCRIPTION = "COMPLEX_DESCRIPTION"
+COMP_ID = "COMP_ID"
+COMP_PROTEINS = "COMP_PROTEINS"
+COMP_INFO = "COMP_INFO"
 
-CROSS_VAL_ITER = "ITER"  # for cross-validation iterations
+XVAL_ITER = "ITER"  # for cross-validation iterations
 
 # Features
 REL = "REL"  # Experiment reliability - MV Scoring (Post-processed)
@@ -24,7 +24,7 @@ CO_OCCUR = "CO_OCCUR"  # Co-ocurrence in PubMed literature
 
 GO_SS = "GO_SS"  # average of GO_CC, GO_BP, and GO_MF
 
-FEATURES = [REL, CO_EXP, GO_CC, GO_BP, GO_MF, TOPO, TOPO_L2, STRING, CO_OCCUR]
+FEATURES = [TOPO, TOPO_L2, STRING, CO_OCCUR, REL, CO_EXP, GO_CC, GO_BP, GO_MF]
 
 # Labels of protein pairs
 IS_CO_COMP = "IS_CO_COMP"
