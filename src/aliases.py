@@ -10,6 +10,10 @@ COMP_PROTEINS = "COMP_PROTEINS"
 COMP_INFO = "COMP_INFO"
 
 XVAL_ITER = "ITER"  # for cross-validation iterations
+MODEL = "MODEL"
+SCENARIO = "SCENARIO"
+MAE = "MAE"
+MSE = "MSE"
 
 # Features
 REL = "REL"  # Experiment reliability - MV Scoring (Post-processed)

@@ -2,14 +2,30 @@
 
 from typing import List
 
+import matplotlib.pyplot as plt
 import polars as pl
+import seaborn as sns
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.naive_bayes import CategoricalNB
 from sklearn.neural_network import MLPClassifier
 
-from aliases import FEATURES, IS_CO_COMP, PROTEIN_U, PROTEIN_V, SUPER_FEATS, WEIGHT
+from aliases import (
+    FEATURES,
+    IS_CO_COMP,
+    MAE,
+    MODEL,
+    MSE,
+    PROTEIN_U,
+    PROTEIN_V,
+    SCENARIO,
+    SUPER_FEATS,
+    WEIGHT,
+    XVAL_ITER,
+)
 from assertions import assert_df_normalized
 from co_comp_classifier import CoCompClassifier
+from evaluator import Evaluator
 from model_preprocessor import ModelPreprocessor
 from utils import construct_composite_network, get_cyc_train_test_comp_pairs
 
@@ -50,14 +66,14 @@ if __name__ == "__main__":
     for f in FEATURES:
         df_f_weighted = feat_weighting.main(df_composite, [f], f)
         print(f"Done feature weighting using: {f}")
-        assert_df_normalized(df_f_weighted, WEIGHT)
+        assert_df_normalized(df_f_weighted, [WEIGHT])
     print("------------- END: FEATURE WEIGHTING ----------------------\n\n")
 
     print("------------- BEGIN: SUPER FEATURE WEIGHTING ----------------------")
     for f in SUPER_FEATS:
         df_f_weighted = feat_weighting.main(df_composite, f["features"], f["name"])
         print(f"Done feature weighting using: {f['name']} - {f['features']}")
-        assert_df_normalized(df_f_weighted, WEIGHT)
+        assert_df_normalized(df_f_weighted, [WEIGHT])
     print("------------- END: SUPER FEATURE WEIGHTING ----------------------\n\n")
 
     print("------------- BEGIN: SUPERVISED WEIGHTING ----------------------")
@@ -72,9 +88,18 @@ if __name__ == "__main__":
     # Weighting Models
     rf = CoCompClassifier(RandomForestClassifier(), "rf")
     cnb = CoCompClassifier(CategoricalNB(), "cnb")
+    mlp = CoCompClassifier(MLPClassifier(max_iter=2000), "mlp")
 
-    df_rf_eval_summary = pl.DataFrame()
-    df_cnb_eval_summary = pl.DataFrame()
+    evaluator = Evaluator()
+
+    df_evals = pl.DataFrame(
+        schema={
+            MODEL: pl.Utf8,
+            SCENARIO: pl.Utf8,
+            MAE: pl.Float64,
+            MSE: pl.Float64,
+        }
+    )
 
     for xval_iter in range(n_iters):
         print(f"------------------- BEGIN: ITER {xval_iter} ---------------------")
@@ -91,42 +116,77 @@ if __name__ == "__main__":
             df_composite, df_all_pairs, IS_CO_COMP, xval_iter
         )
 
-        # Run the classifiers
-
         # Discretize the network using MDLP
         df_composite_binned = model_prep.discretize_composite(
             df_composite, df_train_labeled, features, IS_CO_COMP, xval_iter
         )
 
-        # Run the random forest classifier
+        # SWC cross-val output
+        df_w_swc = pl.read_csv(
+            f"../data/swc/all_edges/cross_val/swc scored_edges iter{xval_iter}.txt",
+            new_columns=[PROTEIN_U, PROTEIN_V, WEIGHT],
+            separator=" ",
+        )
+
+        # Run the classifiers
         df_w_cnb = cnb.main(df_composite_binned, df_train_labeled, xval_iter)
-
-        # Evaluate categorical Naive-Bayes performance
-        df_cnb_eval = cnb.evaluate(df_w_cnb, df_test_labeled, df_all_labeled, xval_iter)
-
-        if df_cnb_eval_summary.is_empty():
-            df_cnb_eval_summary = df_cnb_eval
-        else:
-            df_cnb_eval_summary = pl.concat([df_cnb_eval_summary, df_cnb_eval])
-
-        # Run the random forest classifier
         df_w_rf = rf.main(df_composite, df_train_labeled, xval_iter)
+        df_w_mlp = mlp.main(df_composite, df_train_labeled, xval_iter)
 
-        # Evaluate random forest performance
-        df_rf_eval = rf.evaluate(df_w_rf, df_test_labeled, df_all_labeled, xval_iter)
-        if df_rf_eval_summary.is_empty():
-            df_rf_eval_summary = df_rf_eval
-        else:
-            df_rf_eval_summary = pl.concat([df_rf_eval_summary, df_rf_eval])
+        # Evaluate the classifiers
+        df_cnb_eval = evaluator.evaluate_co_comp_classifier(
+            cnb.name, df_w_cnb, df_test_labeled, df_all_labeled, IS_CO_COMP
+        )
+        df_rf_eval = evaluator.evaluate_co_comp_classifier(
+            rf.name, df_w_rf, df_test_labeled, df_all_labeled, IS_CO_COMP
+        )
+        df_mlp_eval = evaluator.evaluate_co_comp_classifier(
+            mlp.name, df_w_mlp, df_test_labeled, df_all_labeled, IS_CO_COMP
+        )
+
+        # Evaluate SWC as well
+        df_swc_eval = evaluator.evaluate_co_comp_classifier(
+            "swc", df_w_swc, df_test_labeled, df_all_labeled, IS_CO_COMP
+        )
 
         print()
         print(f"Evaluation summary of the models on xval_iter={xval_iter}")
-        print(df_cnb_eval)
-        print(df_rf_eval)
+
+        df_iter_evals = (
+            pl.concat([df_cnb_eval, df_rf_eval, df_mlp_eval, df_swc_eval])
+            .melt(
+                id_vars=[MODEL, SCENARIO],
+                variable_name="ERROR_KIND",
+                value_name="ERROR_VAL",
+            )
+            .pivot(
+                values="ERROR_VAL",
+                index=[MODEL, "ERROR_KIND"],
+                columns=SCENARIO,
+                aggregate_function="first",
+                maintain_order=True,
+            )
+        )
+        print(df_iter_evals)
+
+        df_evals = pl.concat(
+            [df_evals, df_cnb_eval, df_rf_eval, df_mlp_eval, df_swc_eval]
+        )
 
         print(f"------------------- END: ITER {xval_iter} ---------------------\n\n")
 
     print(f"All {n_iters} iterations done!")
     print("Comparing evaluation scores of the co-complex classifiers")
-    print(df_rf_eval_summary)
-    print(df_cnb_eval_summary)
+
+    sns.set_palette("deep")
+    df_pd_evals = df_evals.to_pandas()
+
+    plt.figure()
+    mae_fig = sns.barplot(data=df_pd_evals, x=SCENARIO, y=MAE, hue=MODEL)
+    mae_fig.set_title("MAE of various co-complex classifiers.")
+
+    plt.figure()
+    mse_fig = sns.barplot(data=df_pd_evals, x=SCENARIO, y=MSE, hue=MODEL)
+    mse_fig.set_title("MSE of various co-complex classifiers.")
+
+    plt.show()

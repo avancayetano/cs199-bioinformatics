@@ -7,6 +7,7 @@ from imodels.discretization.mdlp import MDLPDiscretizer
 from sklearn.preprocessing import MinMaxScaler
 
 from aliases import PROTEIN_U, PROTEIN_V
+from assertions import assert_df_normalized
 from utils import get_unique_proteins
 
 
@@ -72,7 +73,7 @@ class ModelPreprocessor:
             [PROTEIN_U, PROTEIN_V, *selected_feats]
         )
         for f in selected_feats:
-            cut_labels = ["0"] + [str(idx + 1) for idx, _ in enumerate(cuts[f])]
+            cut_labels = ["0"] + [str(int(idx + 1)) for idx, _ in enumerate(cuts[f])]
 
             df_cut = (
                 df_composite.select(pl.col(f))
@@ -93,6 +94,11 @@ class ModelPreprocessor:
         removed_feats = list(filter(lambda f: f not in selected_feats, features))
         print(f"MDLP Discretization done! Removed features: {removed_feats}")
         print()
+
+        df_composite_binned = self.normalize_features(
+            df_composite_binned, selected_feats
+        )
+        assert_df_normalized(df_composite_binned, selected_feats)
 
         return df_composite_binned
 
