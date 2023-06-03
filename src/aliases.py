@@ -1,8 +1,4 @@
-from typing import List, TypedDict, Union
-
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.naive_bayes import CategoricalNB
-from sklearn.neural_network import MLPClassifier
+from typing import List, TypedDict
 
 PROTEIN_U = "PROTEIN_U"
 PROTEIN_V = "PROTEIN_V"
@@ -67,6 +63,3 @@ PROBA_NIP = "PROBA_NIP"  # probability of being a NIP pair; later used as a feat
 PROBA_NON_NIP = "PROBA_NON_NIP"
 
 WEIGHT = "WEIGHT"  # alias for PROBA_CO_COMP
-
-
-WeightingModel = Union[RandomForestClassifier, CategoricalNB, MLPClassifier]

@@ -1,15 +1,13 @@
 # pyright: basic
 
-import os
-import pprint
-from typing import Dict, List, Literal, Union
+from typing import Dict, List, Literal, Tuple, Union
 
 import polars as pl
 from imodels.discretization.mdlp import MDLPDiscretizer
 from sklearn.preprocessing import MinMaxScaler
 
 from aliases import PROTEIN_U, PROTEIN_V
-from utils import get_all_cyc_proteins, get_cyc_comp_pairs, get_unique_proteins
+from utils import get_unique_proteins
 
 
 class ModelPreprocessor:
@@ -17,7 +15,7 @@ class ModelPreprocessor:
     Collection of preprocessing methods for the machine learning models.
 
     - [X] Normalizing features
-    - [ ] Discretizing features
+    - [X] Discretizing features
     - [X] Labeling composite network
     """
 
@@ -46,7 +44,6 @@ class ModelPreprocessor:
         label: str,
         xval_iter: int,
     ):
-        # if not os.path.exists(f"../data/training/discretized_data_iter{xval_iter}.csv"):
         df_feat_label = df_labeled.join(
             df_composite, on=[PROTEIN_U, PROTEIN_V], how="left"
         )
@@ -66,13 +63,15 @@ class ModelPreprocessor:
         label: str,
         xval_iter: int,
     ) -> pl.DataFrame:
+        print()
+        print("Discretizing the features (only for models that need discrete values)")
         self.learn_discretization(df_composite, df_labeled, features, label, xval_iter)
-        cuts = self.get_cuts(xval_iter)
-        print("CUTS")
-        pprint.pprint(cuts)
+        cuts, selected_feats = self.get_cuts(xval_iter)
 
-        df_composite_binned = df_composite
-        for f in features:
+        df_composite_binned = df_composite.select(
+            [PROTEIN_U, PROTEIN_V, *selected_feats]
+        )
+        for f in selected_feats:
             cut_labels = ["0"] + [str(idx + 1) for idx, _ in enumerate(cuts[f])]
 
             df_cut = (
@@ -87,15 +86,20 @@ class ModelPreprocessor:
 
             df_composite_binned = df_composite_binned.join(df_cut, on=f, how="left")
 
-        df_composite_binned = df_composite_binned.select(pl.exclude(features)).rename(
-            {f"{f}_BINNED": f for f in features}
-        )
+        df_composite_binned = df_composite_binned.select(
+            pl.exclude(selected_feats)
+        ).rename({f"{f}_BINNED": f for f in selected_feats})
+
+        removed_feats = list(filter(lambda f: f not in selected_feats, features))
+        print(f"MDLP Discretization done! Removed features: {removed_feats}")
+        print()
 
         return df_composite_binned
 
-    def get_cuts(self, xval_iter: int) -> Dict[str, List[float]]:
+    def get_cuts(self, xval_iter: int) -> Tuple[Dict[str, List[float]], List[str]]:
         bins: Dict[str, List[float]] = {}
         feature = ""
+        selected_feats: List[str] = []
         with open(f"../data/training/discretized_bins_iter{xval_iter}.csv") as file:
             lines = file.readlines()[1:]
             for line in lines:
@@ -103,14 +107,17 @@ class ModelPreprocessor:
                 if line.startswith("attr: "):
                     feature = line.replace("attr: ", "")
                     continue
-                else:
+                elif line.startswith("-inf"):
                     cuts = [
                         float(interval.split("_to_")[1])
                         for interval in line.split(", ")
                     ][:-1]
+                    selected_feats.append(feature)
                     bins[feature] = cuts
+                elif line.startswith("All"):
+                    bins[feature] = []
 
-        return bins
+        return bins, selected_feats
 
     def label_composite(
         self,

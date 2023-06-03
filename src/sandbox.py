@@ -18,3 +18,77 @@ df_all_relevant = df_composite.join(
     df_all_pairs, on=[PROTEIN_U, PROTEIN_V], how="inner"
 )
 print(df_all_relevant)
+
+
+# print(f"{self.name}...")
+# df_check = df_train_labeled.join(
+#     df_w_composite,
+#     on=[PROTEIN_U, PROTEIN_V],
+#     how="left",
+# ).select([PROTEIN_U, PROTEIN_V, PROBA_NON_CO_COMP, PROBA_CO_COMP, IS_CO_COMP])
+
+# print(df_check.sample(fraction=1.0, shuffle=True))
+    def validate(
+        self,
+        df_w_composite: pl.DataFrame,
+        df_train_pairs: pl.DataFrame,
+        df_test_pairs: pl.DataFrame,
+    ):
+        print("Validating vs cross-val testing set...")
+
+        lf_test = (
+            df_w_composite.lazy()
+            .select(pl.exclude(self.label))
+            .join(
+                df_train_pairs.lazy(),
+                on=[PROTEIN_U, PROTEIN_V],
+                how="anti",
+            )
+            .join(
+                df_test_pairs.lazy().with_columns(pl.lit(1).alias(self.label)),
+                on=[PROTEIN_U, PROTEIN_V],
+                how="left",
+            )
+        )
+
+        df_test_all = lf_test.fill_null(pl.lit(0)).collect()
+        residual = df_test_all.select(
+            self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
+        )
+        # print(residual)
+
+        print("Compare with co-complex edges only")
+        df_test_positive = lf_test.drop_nulls(subset=self.label).collect()
+        residual = df_test_positive.select(
+            self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
+        )
+        # print(residual)
+
+        print("Validating vs the whole reference complexes set (actual class)...")
+        df_comp_pairs = pl.concat(
+            [df_train_pairs, df_test_pairs], how="vertical"
+        ).unique(maintain_order=True)
+
+        lf = (
+            df_w_composite.lazy()
+            .select(pl.exclude(self.label))
+            .join(
+                df_comp_pairs.lazy().with_columns(pl.lit(1).alias(self.label)),
+                on=[PROTEIN_U, PROTEIN_V],
+                how="left",
+            )
+        )
+
+        df_all = lf.fill_null(pl.lit(0)).collect()
+        residual = df_all.select(
+            self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
+        )
+        # print(residual)
+
+        print("Compare with co-complex edges only")
+
+        df_positive = lf.drop_nulls(subset=self.label).collect()
+        residual = df_positive.select(
+            self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
+        )
+        print(residual)

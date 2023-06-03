@@ -178,6 +178,10 @@ def get_cyc_train_test_comp_pairs(iter: int) -> Tuple[pl.DataFrame, pl.DataFrame
         COMP_ID
     )
 
+    print(
+        f"Train complexes: {df_train_ids.shape[0]} | Test complexes: {df_test_ids.shape[0]}"
+    )
+
     df_train = get_cyc_comp_pairs(df_train_ids)
     df_test = get_cyc_comp_pairs(df_test_ids)
 

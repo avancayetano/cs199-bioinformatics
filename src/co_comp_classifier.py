@@ -1,8 +1,12 @@
 # pyright: basic
 
-from typing import List, Union
+from typing import Union
 
 import polars as pl
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import mean_absolute_error
+from sklearn.naive_bayes import CategoricalNB
+from sklearn.neural_network import MLPClassifier
 
 from aliases import (
     IS_CO_COMP,
@@ -11,10 +15,9 @@ from aliases import (
     PROTEIN_U,
     PROTEIN_V,
     WEIGHT,
-    WeightingModel,
 )
 
-RESIDUAL = "RESIDUAL"
+WeightingModel = Union[RandomForestClassifier, CategoricalNB, MLPClassifier]
 
 
 class CoCompClassifier:
@@ -24,42 +27,51 @@ class CoCompClassifier:
 
     def __init__(
         self,
-        features: List[str],
         model: WeightingModel,
         name: str,
     ):
-        self.features = features
         self.label = IS_CO_COMP
         self.model = model
         self.name = name
 
     def weight(
-        self, df_composite: pl.DataFrame, df_labeled: pl.DataFrame, xval_iter: int
+        self, df_composite: pl.DataFrame, df_train_labeled: pl.DataFrame, xval_iter: int
     ) -> pl.DataFrame:
         """
-        Weight composite network based on the labeled data.
+        Weight composite network based on co-complex probability.
 
         Args:
             df_composite (pl.DataFrame): _description_
-            df_labeled (pl.DataFrame): _description_
+            df_train_labeled (pl.DataFrame): _description_
 
         Returns:
             pl.DataFrame: _description_
         """
 
-        print(">>> Weighting")
-        df_feat_label = df_labeled.join(
+        selected_features = df_composite.select(
+            pl.exclude([PROTEIN_U, PROTEIN_V, self.label])
+        ).columns
+        print(f"Weighting model: {self.name}")
+        print(f"Selected features: {selected_features}")
+
+        df_feat_label = df_train_labeled.join(
             df_composite, on=[PROTEIN_U, PROTEIN_V], how="left"
         )
-        X_train = df_feat_label.select(self.features).to_numpy()
+        X_train = df_feat_label.select(selected_features).to_numpy()
         y_train = df_feat_label.select(self.label).to_numpy().ravel()
 
-        print("Training the model...")
-        print(f"Number of training samples: {X_train.shape[0]}")
+        n_samples = X_train.shape[0]
+        co_comp_samples = y_train[y_train == 1].shape[0]
+        non_co_comp_samples = n_samples - co_comp_samples
+
+        print(f"Training the model")
+        print(
+            f"Train samples: {n_samples} | Co-comp samples: {co_comp_samples} | Non-co-comp samples: {non_co_comp_samples}"
+        )
         self.model.fit(X_train, y_train)  # training the model
 
         # After learning the parameters, weight all protein pairs
-        X_test = df_composite.select(self.features).to_numpy()
+        X_test = df_composite.select(selected_features).to_numpy()
         ndarr_pred = self.model.predict_proba(X_test)
 
         CLASS_PROBA = [PROBA_NON_CO_COMP, PROBA_CO_COMP]
@@ -78,104 +90,89 @@ class CoCompClassifier:
 
         return df_w_composite
 
-    def residual(self, col_a: str, col_b: str) -> pl.Expr:
-        return (pl.col(col_a) - pl.col(col_b)).abs().mean()
-
-    def validate(
+    def evaluate(
         self,
         df_w_composite: pl.DataFrame,
-        df_train_pairs: pl.DataFrame,
-        df_test_pairs: pl.DataFrame,
-    ):
-        pass
-
-    def validate_legacy(
-        self,
-        df_w_composite: pl.DataFrame,
-        df_train_pairs: pl.DataFrame,
-        df_test_pairs: pl.DataFrame,
-    ):
-        print("Validating vs cross-val testing set...")
-
-        lf_test = (
-            df_w_composite.lazy()
-            .select(pl.exclude(self.label))
-            .join(
-                df_train_pairs.lazy(),
-                on=[PROTEIN_U, PROTEIN_V],
-                how="anti",
-            )
-            .join(
-                df_test_pairs.lazy().with_columns(pl.lit(1).alias(self.label)),
-                on=[PROTEIN_U, PROTEIN_V],
-                how="left",
-            )
-        )
-
-        df_test_all = lf_test.fill_null(pl.lit(0)).collect()
-        residual = df_test_all.select(
-            self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
-        )
-        # print(residual)
-
-        print("Compare with co-complex edges only")
-        df_test_positive = lf_test.drop_nulls(subset=self.label).collect()
-        residual = df_test_positive.select(
-            self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
-        )
-        # print(residual)
-
-        print("Validating vs the whole reference complexes set (actual class)...")
-        df_comp_pairs = pl.concat(
-            [df_train_pairs, df_test_pairs], how="vertical"
-        ).unique(maintain_order=True)
-
-        lf = (
-            df_w_composite.lazy()
-            .select(pl.exclude(self.label))
-            .join(
-                df_comp_pairs.lazy().with_columns(pl.lit(1).alias(self.label)),
-                on=[PROTEIN_U, PROTEIN_V],
-                how="left",
-            )
-        )
-
-        df_all = lf.fill_null(pl.lit(0)).collect()
-        residual = df_all.select(
-            self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
-        )
-        # print(residual)
-
-        print("Compare with co-complex edges only")
-
-        df_positive = lf.drop_nulls(subset=self.label).collect()
-        residual = df_positive.select(
-            self.residual(self.label, PROBA_CO_COMP).alias(RESIDUAL)
-        )
-        print(residual)
-
-    def main(
-        self,
-        df_composite: pl.DataFrame,
-        df_labeled: pl.DataFrame,
-        df_train_pairs: pl.DataFrame,
-        df_test_pairs: pl.DataFrame,
+        df_test_labeled: pl.DataFrame,
+        df_all_labeled: pl.DataFrame,
         xval_iter: int,
     ) -> pl.DataFrame:
-        df_w_composite = self.weight(df_composite, df_labeled, xval_iter)
-        # self.validate(df_w_composite, df_train_pairs, df_test_pairs)
+        """
+        Evaluate the results in terms of:
+        1. Predicting co-comp pairs in test co-comp pairs
+        2. Predicting co-comp pairs in (train + test) co-comp pairs
+        3. Predicting co-comp and non-co-comp pairs in (test) (co-comp + non-co-comp) pairs
+        3. Predicting co-comp and non-co-comp pairs in (train + test) (co-comp + non-co-comp) pairs
 
-        print(f"{self.name}...")
-        df_check = df_labeled.join(
-            df_w_composite,
-            on=[PROTEIN_U, PROTEIN_V],
-            how="left",
-        ).select([PROTEIN_U, PROTEIN_V, PROBA_NON_CO_COMP, PROBA_CO_COMP, IS_CO_COMP])
+        NOTE:
+        - Labeled: Both co-comp and non-co-comp labeled pairs
 
-        print(df_check.sample(fraction=1.0, shuffle=True))
+        Scenario codes:
+        1. TEST_CO
+        2. ALL_CO
+        3. TEST_CO-NONCO
+        4. ALL_CO-NONCO
 
-        df_w_composite = df_w_composite.rename({PROBA_CO_COMP: WEIGHT}).select(
-            [PROTEIN_U, PROTEIN_V, WEIGHT]
+        Args:
+            df_w_composite (pl.DataFrame): _description_
+            df_train_labeled (pl.DataFrame): _description_
+            df_test_labeled (pl.DataFrame): _description_
+            xval_iter (int): _description_
+        """
+
+        df_w_test_labeled = df_w_composite.join(
+            df_test_labeled, on=[PROTEIN_U, PROTEIN_V], how="inner"
+        )
+        df_w_all_labeled = df_w_composite.join(
+            df_all_labeled, on=[PROTEIN_U, PROTEIN_V], how="inner"
+        )
+        scenarios = {
+            "TEST_CO": df_w_test_labeled.filter(pl.col(IS_CO_COMP) == 1),
+            "ALL_CO": df_w_all_labeled.filter(pl.col(IS_CO_COMP) == 1),
+            "TEST_CO-NONCO": df_w_test_labeled,
+            "ALL_CO-NONCO": df_w_all_labeled,
+        }
+        eval_summary = {
+            "MODEL": [],
+            "XVAL_ITER": [],
+            "SCENARIO": [],
+            "MAE": [],
+        }
+        for s in scenarios:
+            eval_info = self.get_eval_info(scenarios[s])
+            eval_summary["MODEL"].append(self.name)
+            eval_summary["XVAL_ITER"].append(xval_iter)
+            eval_summary["SCENARIO"].append(s)
+            eval_summary["MAE"].append(eval_info["MAE"])
+
+        # Add summary row
+        eval_summary["MODEL"].append(self.name)
+        eval_summary["XVAL_ITER"].append(xval_iter)
+        eval_summary["SCENARIO"].append("AVG")
+        eval_summary["MAE"].append(sum(eval_summary["MAE"]) / len(scenarios.keys()))
+
+        df_eval_summary = pl.DataFrame(eval_summary)
+
+        return df_eval_summary
+
+    def get_eval_info(self, df_pred_label: pl.DataFrame):
+        y_pred = df_pred_label.select(WEIGHT).to_series().to_numpy()
+        y_true = df_pred_label.select(self.label).to_series().to_numpy()
+        return {
+            "MAE": mean_absolute_error(y_true, y_pred),
+        }
+
+    def main(
+        self, df_composite: pl.DataFrame, df_train_labeled: pl.DataFrame, xval_iter: int
+    ) -> pl.DataFrame:
+        print()
+        df_w_composite = self.weight(df_composite, df_train_labeled, xval_iter)
+
+        df_w_composite = (
+            df_w_composite.lazy()
+            .rename({PROBA_CO_COMP: WEIGHT})
+            .select([PROTEIN_U, PROTEIN_V, WEIGHT])
+            .collect()
         )
 
         df_w_composite.write_csv(
@@ -183,5 +180,12 @@ class CoCompClassifier:
             has_header=False,
             separator="\t",
         )
+
+        df_w_composite.sort(pl.col(WEIGHT), descending=True).head(20_000).write_csv(
+            f"../data/weighted/20k_edges/cross_val/{self.name}_iter{xval_iter}.csv",
+            has_header=False,
+            separator="\t",
+        )
+        print()
 
         return df_w_composite
