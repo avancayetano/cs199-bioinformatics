@@ -27,9 +27,10 @@ class ExploratoryDataAnalysis:
         self.model_prep = ModelPreprocessor()
 
     def features_heatmap(self):
-        plt.figure()
         df_pd_composite = self.df_composite.to_pandas()
         df_corr_matrix = df_pd_composite[self.features].corr()
+
+        plt.figure()
         ax = sns.heatmap(
             df_corr_matrix,
             annot=True,
@@ -41,8 +42,9 @@ class ExploratoryDataAnalysis:
         ax.set_title("Correlation among the features.")
 
     def features_dist_hist(self):
-        plt.figure()
         df_pd_composite = self.df_composite.to_pandas()
+
+        plt.figure()
         ax = sns.histplot(
             data=df_pd_composite[self.features],
             binwidth=0.05,
@@ -52,29 +54,34 @@ class ExploratoryDataAnalysis:
         ax.set_title("Feature values distribution.")
 
     def explore_co_complexes(self):
-        plt.figure()
         label = IS_CO_COMP
 
         df_comp_pairs = get_cyc_comp_pairs()
-        df_labeled = self.model_prep.label_composite(
-            self.df_composite,
-            df_comp_pairs,
-            label,
+        df_labeled_all = self.model_prep.label_composite(
+            self.df_composite, df_comp_pairs, label, mode="all", balanced=False
+        )
+        df_labeled_subset = self.model_prep.label_composite(
+            self.df_composite, df_comp_pairs, label, mode="subset", balanced=False
         )
 
-        df_pd_display = df_labeled.melt(
+        self.co_vs_non_co_comp(df_labeled_all, label, "all")
+        self.co_vs_non_co_comp(df_labeled_subset, label, "subset")
+
+    def co_vs_non_co_comp(self, df_labeled: pl.DataFrame, label: str, mode: str):
+        df_feat_labeled = self.df_composite.join(df_labeled, on=[PROTEIN_U, PROTEIN_V])
+        df_pd_display = df_feat_labeled.melt(
             id_vars=[PROTEIN_U, PROTEIN_V, label],
             variable_name="FEATURE",
             value_name="VALUE",
         ).to_pandas()
 
+        plt.figure()
         ax = sns.barplot(data=df_pd_display, x="FEATURE", y="VALUE", hue=label)
         ax.set_title(
-            "Mean feature values of co-complex and non-co-complex protein pairs."
+            f"({mode}) Mean feature values of co-complex and non-co-complex protein pairs."
         )
 
     def explore_nip_pairs(self):
-        plt.figure()
         label = IS_NIP
 
         df_nip_pairs = pl.read_csv(
@@ -89,14 +96,83 @@ class ExploratoryDataAnalysis:
             mode="all",
             balanced=False,
         )
-        df_pd_display = df_labeled.melt(
+
+        df_feat_labeled = self.df_composite.join(df_labeled, on=[PROTEIN_U, PROTEIN_V])
+        df_pd_display = df_feat_labeled.melt(
             id_vars=[PROTEIN_U, PROTEIN_V, label],
             variable_name="FEATURE",
             value_name="VALUE",
         ).to_pandas()
 
+        plt.figure()
         ax = sns.barplot(data=df_pd_display, x="FEATURE", y="VALUE", hue=label)
         ax.set_title("Mean feature values of NIP and non-NIP pairs.")
+
+    def nip_co_comp_intersection(self):
+        PAIR_TYPE = "PAIR_TYPE"
+
+        df_pair_types = self.df_composite.with_columns(
+            pl.lit("NEITHER").alias(PAIR_TYPE)
+        )
+
+        df_nip_pairs = pl.read_csv(
+            "../data/preprocessed/yeast_nips.csv",
+            has_header=False,
+            new_columns=[PROTEIN_U, PROTEIN_V],
+        ).with_columns(pl.lit("NIP").alias(PAIR_TYPE))
+
+        df_pair_types = (
+            df_pair_types.join(df_nip_pairs, on=[PROTEIN_U, PROTEIN_V], how="left")
+            .with_columns(
+                pl.when(pl.col(f"{PAIR_TYPE}_right").is_not_null())
+                .then(pl.col(f"{PAIR_TYPE}_right"))
+                .otherwise(pl.col(PAIR_TYPE))
+                .alias(PAIR_TYPE)
+            )
+            .drop(f"{PAIR_TYPE}_right")
+        )
+
+        df_comp_pairs = get_cyc_comp_pairs().with_columns(
+            pl.lit("CO_COMP").alias(PAIR_TYPE)
+        )
+
+        df_pair_types = (
+            df_pair_types.join(df_comp_pairs, on=[PROTEIN_U, PROTEIN_V], how="left")
+            .with_columns(
+                pl.when(pl.col(f"{PAIR_TYPE}_right").is_not_null())
+                .then(pl.col(f"{PAIR_TYPE}_right"))
+                .otherwise(pl.col(PAIR_TYPE))
+                .alias(PAIR_TYPE)
+            )
+            .drop(f"{PAIR_TYPE}_right")
+        )
+
+        df_nip_co_comp = (
+            df_nip_pairs.drop(PAIR_TYPE)
+            .join(df_comp_pairs.drop(PAIR_TYPE), on=[PROTEIN_U, PROTEIN_V], how="inner")
+            .with_columns(pl.lit("BOTH").alias(PAIR_TYPE))
+        )
+
+        df_pair_types = (
+            df_pair_types.join(df_nip_co_comp, on=[PROTEIN_U, PROTEIN_V], how="left")
+            .with_columns(
+                pl.when(pl.col(f"{PAIR_TYPE}_right").is_not_null())
+                .then(pl.col(f"{PAIR_TYPE}_right"))
+                .otherwise(pl.col(PAIR_TYPE))
+                .alias(PAIR_TYPE)
+            )
+            .drop(f"{PAIR_TYPE}_right")
+        )
+
+        df_pd_display = df_pair_types.melt(
+            id_vars=[PROTEIN_U, PROTEIN_V, PAIR_TYPE],
+            variable_name="FEATURE",
+            value_name="VALUE",
+        ).to_pandas()
+
+        plt.figure()
+        ax = sns.barplot(data=df_pd_display, x="FEATURE", y="VALUE", hue=PAIR_TYPE)
+        ax.set_title("Mean feature values of pair type groups.")
 
     def main(self):
         print(self.df_composite.select(self.features).describe())
@@ -104,16 +180,17 @@ class ExploratoryDataAnalysis:
             self.df_composite, self.features
         )
         print(self.df_composite.select(self.features).describe())
-        self.features_heatmap()
-        self.features_dist_hist()
+        # self.features_heatmap()
+        # self.features_dist_hist()
         self.explore_co_complexes()
-        self.explore_nip_pairs()
+        # self.explore_nip_pairs()
+
+        # self.nip_co_comp_intersection()
         plt.show()
 
 
 if __name__ == "__main__":
     pl.Config.set_tbl_cols(40)
-    pl.Config.set_tbl_rows(7)
 
     features = FEATURES
     eda = ExploratoryDataAnalysis(features)

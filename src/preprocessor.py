@@ -113,6 +113,7 @@ class Preprocessor:
             .rename({"To": "u", "To_right": "v"})
             .with_columns(sort_prot_cols("u", "v"))
             .select([PROTEIN_U, PROTEIN_V])
+            .unique()
         ).collect()
 
         assert_prots_sorted(df_nips)

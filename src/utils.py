@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 import polars as pl
 
@@ -76,6 +76,25 @@ def construct_composite_network(features: Optional[List[str]] = None) -> pl.Data
 
     assert_prots_sorted(df_composite)
     return df_composite
+
+
+def get_clusters_list(path: str) -> List[Set[str]]:
+    clusters: List[Set[str]] = []
+    with open(path) as file:
+        lines = file.readlines()
+        for line in lines:
+            proteins = set(line.split("\t"))
+            clusters.append(proteins)
+
+    return clusters
+
+
+def get_complexes_list() -> List[Set[str]]:
+    df_complexes = get_all_cyc_complexes()
+    cmps: List[List[str]] = df_complexes.select(COMP_PROTEINS).to_series().to_list()
+    complexes: List[Set[str]] = list(map(lambda cmp: set(cmp), cmps))
+
+    return complexes
 
 
 def get_all_cyc_complexes() -> pl.DataFrame:

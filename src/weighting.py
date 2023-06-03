@@ -20,10 +20,10 @@ from aliases import (
     PROTEIN_V,
     SCENARIO,
     SUPER_FEATS,
+    TOPO,
     WEIGHT,
-    XVAL_ITER,
 )
-from assertions import assert_df_normalized
+from assertions import assert_df_bounded
 from co_comp_classifier import CoCompClassifier
 from evaluator import Evaluator
 from model_preprocessor import ModelPreprocessor
@@ -61,19 +61,32 @@ if __name__ == "__main__":
 
     df_composite = construct_composite_network()
 
+    print("Writing unweighted network")
+    df_unweighted = (
+        df_composite.filter(pl.col(TOPO) > 0)
+        .with_columns(pl.lit(1.0).alias(WEIGHT))
+        .select([PROTEIN_U, PROTEIN_V, WEIGHT])
+    )
+
+    df_unweighted.write_csv(
+        "../data/weighted/unweighted.csv", has_header=False, separator="\t"
+    )
+    print("Done writing unweighted network")
+    print()
+
     print("------------- BEGIN: FEATURE WEIGHTING ----------------------")
     feat_weighting = FeatureWeighting()
     for f in FEATURES:
         df_f_weighted = feat_weighting.main(df_composite, [f], f)
         print(f"Done feature weighting using: {f}")
-        assert_df_normalized(df_f_weighted, [WEIGHT])
+        assert_df_bounded(df_f_weighted, [WEIGHT])
     print("------------- END: FEATURE WEIGHTING ----------------------\n\n")
 
     print("------------- BEGIN: SUPER FEATURE WEIGHTING ----------------------")
     for f in SUPER_FEATS:
         df_f_weighted = feat_weighting.main(df_composite, f["features"], f["name"])
         print(f"Done feature weighting using: {f['name']} - {f['features']}")
-        assert_df_normalized(df_f_weighted, [WEIGHT])
+        assert_df_bounded(df_f_weighted, [WEIGHT])
     print("------------- END: SUPER FEATURE WEIGHTING ----------------------\n\n")
 
     print("------------- BEGIN: SUPERVISED WEIGHTING ----------------------")
@@ -105,15 +118,7 @@ if __name__ == "__main__":
         print(f"------------------- BEGIN: ITER {xval_iter} ---------------------")
         df_train_pairs, df_test_pairs = get_cyc_train_test_comp_pairs(xval_iter)
         df_train_labeled = model_prep.label_composite(
-            df_composite, df_train_pairs, IS_CO_COMP, xval_iter
-        )
-        # Preparing data for evaluations
-        df_test_labeled = model_prep.label_composite(
-            df_composite, df_test_pairs, IS_CO_COMP, xval_iter
-        )
-        df_all_pairs = pl.concat([df_train_pairs, df_test_pairs])
-        df_all_labeled = model_prep.label_composite(
-            df_composite, df_all_pairs, IS_CO_COMP, xval_iter
+            df_composite, df_train_pairs, IS_CO_COMP, xval_iter, "all", True
         )
 
         # Discretize the network using MDLP
@@ -127,11 +132,37 @@ if __name__ == "__main__":
             new_columns=[PROTEIN_U, PROTEIN_V, WEIGHT],
             separator=" ",
         )
+        # Rewrite SWC scores as a form of preprocessing before MCL clustering
+        df_w_swc.write_csv(
+            f"../data/weighted/all_edges/cross_val/swc_iter{xval_iter}.csv",
+            has_header=False,
+            separator="\t",
+        )
+
+        # Write top 20k edges of SWC
+        df_w_swc_20k = (
+            df_w_swc.sort(pl.col(WEIGHT), descending=True)
+            .head(20_000)
+            .write_csv(
+                f"../data/weighted/20k_edges/cross_val/swc_20k_iter{xval_iter}.csv",
+                has_header=False,
+                separator="\t",
+            )
+        )
 
         # Run the classifiers
         df_w_cnb = cnb.main(df_composite_binned, df_train_labeled, xval_iter)
         df_w_rf = rf.main(df_composite, df_train_labeled, xval_iter)
         df_w_mlp = mlp.main(df_composite, df_train_labeled, xval_iter)
+
+        # Preparing labeled data for performance evaluations
+        df_test_labeled = model_prep.label_composite(
+            df_composite, df_test_pairs, IS_CO_COMP, xval_iter, "all", False
+        )
+        df_all_pairs = pl.concat([df_train_pairs, df_test_pairs])
+        df_all_labeled = model_prep.label_composite(
+            df_composite, df_all_pairs, IS_CO_COMP, xval_iter, "all", False
+        )
 
         # Evaluate the classifiers
         df_cnb_eval = evaluator.evaluate_co_comp_classifier(
@@ -168,7 +199,6 @@ if __name__ == "__main__":
             )
         )
         print(df_iter_evals)
-
         df_evals = pl.concat(
             [df_evals, df_cnb_eval, df_rf_eval, df_mlp_eval, df_swc_eval]
         )

@@ -51,12 +51,8 @@ SWC data is old (2011 data). However, you might have noticed that I used more mo
     - rel_scores.csv
     - co_exp_scores.csv
   - swc/
-    - all_edges/
-      - cross_val/
-        - swc_weighted scored_edges iter{n}.txt
-    - 20k_edges/
-      - cross_val/
-        - swc_weighted_20k scored_edges iter{n}.txt
+    - raw_weighted/
+      - swc_weighted scored_edges iter{n}.txt
     - complexes_CYC.txt
     - data_yeast.txt
   - training/ - (NOTE: gitignore entire dir except READMEs)

@@ -1,13 +1,11 @@
 #!/usr/bin/bash
 
 # Sample calls:
+# ./run_mcl.sh ../data/weighted/ ./ 4
 # ./run_mcl.sh ../data/weighted/ all_edges/ 4
 # ./run_mcl.sh ../data/weighted/ all_edges/cross_val/ 4
 # ./run_mcl.sh ../data/weighted/ all_edges/features/ 4
 # ./run_mcl.sh ../data/weighted/ 20k_edges/ 4
-# ./run_mcl.sh ../data/swc/ all_edges/ 4
-# ./run_mcl.sh ../data/swc/ all_edges/cross_val/ 4
-# ./run_mcl.sh ../data/swc/ 20k_edges/ 4
 
 parent_dir=$1
 edges_dir=$2

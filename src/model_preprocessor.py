@@ -7,7 +7,7 @@ from imodels.discretization.mdlp import MDLPDiscretizer
 from sklearn.preprocessing import MinMaxScaler
 
 from aliases import PROTEIN_U, PROTEIN_V
-from assertions import assert_df_normalized
+from assertions import assert_df_bounded
 from utils import get_unique_proteins
 
 
@@ -98,7 +98,7 @@ class ModelPreprocessor:
         df_composite_binned = self.normalize_features(
             df_composite_binned, selected_feats
         )
-        assert_df_normalized(df_composite_binned, selected_feats)
+        assert_df_bounded(df_composite_binned, selected_feats)
 
         return df_composite_binned
 
