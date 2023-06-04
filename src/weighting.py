@@ -101,7 +101,7 @@ if __name__ == "__main__":
     # Weighting Models
     rf = CoCompClassifier(RandomForestClassifier(), "rf")
     cnb = CoCompClassifier(CategoricalNB(), "cnb")
-    mlp = CoCompClassifier(MLPClassifier(max_iter=2000), "mlp")
+    mlp = CoCompClassifier(MLPClassifier(max_iter=3000), "mlp")
 
     evaluator = Evaluator()
 
@@ -118,7 +118,7 @@ if __name__ == "__main__":
         print(f"------------------- BEGIN: ITER {xval_iter} ---------------------")
         df_train_pairs, df_test_pairs = get_cyc_train_test_comp_pairs(xval_iter)
         df_train_labeled = model_prep.label_composite(
-            df_composite, df_train_pairs, IS_CO_COMP, xval_iter, "all", True
+            df_composite, df_train_pairs, IS_CO_COMP, xval_iter, "subset", False
         )
 
         # Discretize the network using MDLP
@@ -126,13 +126,13 @@ if __name__ == "__main__":
             df_composite, df_train_labeled, features, IS_CO_COMP, xval_iter
         )
 
-        # SWC cross-val output
+        # SWC cross-validation scores
         df_w_swc = pl.read_csv(
-            f"../data/swc/all_edges/cross_val/swc scored_edges iter{xval_iter}.txt",
+            f"../data/swc/raw_weighted/swc scored_edges iter{xval_iter}.txt",
             new_columns=[PROTEIN_U, PROTEIN_V, WEIGHT],
             separator=" ",
         )
-        # Rewrite SWC scores as a form of preprocessing before MCL clustering
+        # Rewrite SWC scores to another file as a form of preprocessing before MCL clustering
         df_w_swc.write_csv(
             f"../data/weighted/all_edges/cross_val/swc_iter{xval_iter}.csv",
             has_header=False,
@@ -185,12 +185,13 @@ if __name__ == "__main__":
 
         df_iter_evals = (
             pl.concat([df_cnb_eval, df_rf_eval, df_mlp_eval, df_swc_eval])
+            # pl.concat([df_rf_eval, df_mlp_eval, df_swc_eval])
+            # pl.concat([df_mlp_eval, df_swc_eval])
             .melt(
                 id_vars=[MODEL, SCENARIO],
                 variable_name="ERROR_KIND",
                 value_name="ERROR_VAL",
-            )
-            .pivot(
+            ).pivot(
                 values="ERROR_VAL",
                 index=[MODEL, "ERROR_KIND"],
                 columns=SCENARIO,
@@ -202,11 +203,12 @@ if __name__ == "__main__":
         df_evals = pl.concat(
             [df_evals, df_cnb_eval, df_rf_eval, df_mlp_eval, df_swc_eval]
         )
+        # df_evals = pl.concat([df_evals, df_rf_eval, df_mlp_eval, df_swc_eval])
+        # df_evals = pl.concat([df_evals, df_mlp_eval, df_swc_eval])
 
         print(f"------------------- END: ITER {xval_iter} ---------------------\n\n")
 
     print(f"All {n_iters} iterations done!")
-    print("Comparing evaluation scores of the co-complex classifiers")
 
     sns.set_palette("deep")
     df_pd_evals = df_evals.to_pandas()

@@ -1,4 +1,4 @@
-from typing import List, Optional, Set, Tuple
+from typing import List, Literal, Optional, Set, Tuple
 
 import polars as pl
 
@@ -89,11 +89,26 @@ def get_clusters_list(path: str) -> List[Set[str]]:
     return clusters
 
 
-def get_complexes_list() -> List[Set[str]]:
+def get_complexes_list(
+    xval_iter: Optional[int] = None, complex_type: Literal["train", "test"] = "test"
+) -> List[Set[str]]:
     df_complexes = get_all_cyc_complexes()
-    cmps: List[List[str]] = df_complexes.select(COMP_PROTEINS).to_series().to_list()
-    complexes: List[Set[str]] = list(map(lambda cmp: set(cmp), cmps))
+    if xval_iter is None:
+        cmps: List[List[str]] = df_complexes.select(COMP_PROTEINS).to_series().to_list()
 
+    else:
+        df_cross_val = pl.read_csv("../data/preprocessed/cross_val_table.csv")
+        df_complex_ids = df_cross_val.filter(
+            pl.col(f"{XVAL_ITER}_{xval_iter}") == complex_type
+        ).select(COMP_ID)
+        cmps: List[List[str]] = (
+            df_complexes.join(df_complex_ids, on=COMP_ID, how="inner")
+            .select(COMP_PROTEINS)
+            .to_series()
+            .to_list()
+        )
+
+    complexes: List[Set[str]] = list(map(lambda cmp: set(cmp), cmps))
     return complexes
 
 

@@ -1,6 +1,6 @@
 # pyright: basic
 
-from typing import List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Union
 
 import polars as pl
 from sklearn.metrics import (
@@ -21,8 +21,17 @@ from aliases import (
     SCENARIO,
     SUPER_FEATS,
     WEIGHT,
+    XVAL_ITER,
 )
 from utils import get_clusters_list, get_complexes_list
+
+METHOD = "METHOD"
+N_MATCHES = "N_MATCHES"
+N_CLUSTERS = "N_CLUSTERS"
+PREC = "PREC"
+RECALL = "RECALL"
+F_SCORE = "F_SCORE"
+THRESH = "THRESH"
 
 
 class Evaluator:
@@ -96,27 +105,127 @@ class Evaluator:
             MSE: mean_squared_error(y_true, y_pred),
         }
 
-    def evaluate_complex_prediction(self, n_iters: int):
+    def evaluate_complex_prediction(self, n_iters: int, inflation: int = 40):
         """
         Terminologies:
         - cluster: predicted cluster
         - complex: reference (aka real) complex
         - subgraph: either cluster or complex
         """
-        # ref_complexes = None
-        # print("Evaluating the null model (unweighted PPIN)")
-        # unw_clusters = get_clusters_list("../data/clusters/out.unweighted.csv.I40")
-        print("Evaluating clusters from all edges")
 
-        model_clusters = ["cnb", "rf", "mlp", "swc"]
-        feat_clusters = [
+        print("Evaluating protein complex prediction")
+        feat_methods = [
             f.lower() for f in FEATURES + list(map(lambda sf: sf["name"], SUPER_FEATS))
         ]
-        for xval_iter in range(n_iters):
-            pass
+        sv_methods = ["cnb", "rf", "mlp", "swc"]
 
-        # TODO
-        # print("Evaluating clusters from top 20k edges")
+        unw_clusters = get_clusters_list(
+            f"../data/clusters/out.unweighted.csv.I{inflation}"
+        )
+
+        evals_all_edges: List[Dict[str, Union[str, float]]] = []
+        evals_20k_edges: List[Dict[str, Union[str, float]]] = []
+
+        for xval_iter in range(n_iters):
+            print()
+            print(f"Iteration: {xval_iter}")
+            # train_complexes = get_complexes_list(xval_iter, "train")
+            test_complexes = get_complexes_list(xval_iter, "test")
+            print(f"Number of test complexes: {len(test_complexes)}")
+
+            unw_metrics_050 = self.get_complex_prediction_metrics(
+                "unw", unw_clusters, test_complexes, 0.50
+            )
+            unw_metrics_075 = self.get_complex_prediction_metrics(
+                "unw", unw_clusters, test_complexes, 0.75
+            )
+            evals_all_edges.extend([unw_metrics_050, unw_metrics_075])
+            evals_20k_edges.extend([unw_metrics_050, unw_metrics_075])
+
+            iter_evals_all = self.evaluate_clusters(
+                feat_methods,
+                sv_methods,
+                test_complexes,
+                xval_iter,
+                "all_edges",
+                inflation,
+            )
+            iter_evals_20k = self.evaluate_clusters(
+                feat_methods,
+                sv_methods,
+                test_complexes,
+                xval_iter,
+                "20k_edges",
+                inflation,
+            )
+            evals_all_edges.extend(iter_evals_all)
+            evals_20k_edges.extend(iter_evals_20k)
+            print()
+
+        print("Evaluations for clusters using all edges")
+        df_evals_all_edges = (
+            pl.DataFrame(evals_all_edges)
+            .groupby([METHOD, THRESH], maintain_order=True)
+            .mean()
+        )
+        print("On match threshold >= 0.5")
+        print(df_evals_all_edges.filter(pl.col(THRESH) == 0.5))
+
+        print("On match threshold >= 0.75")
+        print(df_evals_all_edges.filter(pl.col(THRESH) == 0.75))
+        print()
+
+        print("Evaluations for clusters using 20k edges")
+        df_evals_20k_edges = (
+            pl.DataFrame(evals_20k_edges)
+            .groupby([METHOD, THRESH], maintain_order=True)
+            .mean()
+        )
+        print("On match threshold >= 0.5")
+        print(df_evals_20k_edges.filter(pl.col(THRESH) == 0.5))
+
+        print("On match threshold >= 0.75")
+        print(df_evals_20k_edges.filter(pl.col(THRESH) == 0.75))
+        print()
+
+    def evaluate_clusters(
+        self,
+        feat_methods: List[str],
+        sv_methods: List[str],
+        test_complexes: List[Set[str]],
+        xval_iter: int,
+        edges: str,
+        inflation: int = 40,
+    ):
+        evals: List[Dict[str, Union[str, float]]] = []
+        suffix = "_20k" if edges == "20k_edges" else ""
+        for feat in feat_methods:
+            feat_clusters = get_clusters_list(
+                f"../data/clusters/{edges}/features/out.{feat}{suffix}.csv.I{inflation}"
+            )
+            feat_metrics_050 = self.get_complex_prediction_metrics(
+                feat, feat_clusters, test_complexes, 0.50
+            )
+            feat_metrics_075 = self.get_complex_prediction_metrics(
+                feat, feat_clusters, test_complexes, 0.75
+            )
+            evals.extend([feat_metrics_050, feat_metrics_075])
+            print(f"Done evaluating {feat} clusters on {edges}")
+
+        for sv in sv_methods:
+            sv_clusters = get_clusters_list(
+                f"../data/clusters/{edges}/cross_val/out.{sv}{suffix}_iter{xval_iter}.csv.I{inflation}"
+            )
+            sv_metrics_050 = self.get_complex_prediction_metrics(
+                sv, sv_clusters, test_complexes, 0.50
+            )
+            sv_metrics_075 = self.get_complex_prediction_metrics(
+                sv, sv_clusters, test_complexes, 0.75
+            )
+            evals.extend([sv_metrics_050, sv_metrics_075])
+            print(f"Done evaluating {sv} clusters on {edges}")
+
+        return evals
 
     def is_match(self, cluster: Set[str], complex: Set[str], thresh: float):
         jaccard_idx = len(cluster.intersection(complex)) / len(cluster.union(complex))
@@ -134,10 +243,14 @@ class Evaluator:
 
     def get_complex_prediction_metrics(
         self,
+        method: str,
         clusters: List[Set[str]],
         test_complexes: List[Set[str]],
         thresh: float,
     ):
+        # filter out small clusters TODO: filter via density, remove duplicates
+        clusters = list(filter(lambda cluster: len(cluster) >= 2, clusters))
+
         # Computing precision
         prec_numerator = len(
             list(
@@ -164,7 +277,28 @@ class Evaluator:
         recall_denominator = len(test_complexes)
         recall = recall_numerator / recall_denominator
 
-        f_score = (2 * prec * recall) / (prec + recall)
+        if prec + recall > 0:
+            f_score = (2 * prec * recall) / (prec + recall)
+        else:
+            f_score = 0
+
         n_matches = recall_numerator
 
-        return (n_matches, prec, recall, f_score)
+        return {
+            METHOD: method,
+            THRESH: thresh,
+            N_MATCHES: n_matches,
+            N_CLUSTERS: len(clusters),
+            PREC: prec,
+            RECALL: recall,
+            F_SCORE: f_score,
+        }
+
+
+if __name__ == "__main__":
+    pl.Config.set_tbl_rows(30)
+    evaluator = Evaluator()
+    # evaluator.evaluate_complex_prediction(10, 20)
+    # evaluator.evaluate_complex_prediction(10, 30)
+    # evaluator.evaluate_complex_prediction(10, 40)
+    # evaluator.evaluate_complex_prediction(10, 50)
