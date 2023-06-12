@@ -240,7 +240,7 @@ class Preprocessor:
                 [
                     "altA",
                     "altB",
-                    # "author",
+                    "author",
                     "pmids",
                     "taxa",
                     "taxb",
@@ -262,10 +262,10 @@ class Preprocessor:
                     pl.col("altA").str.extract(r"cygd:([a-zA-Z0-9]+)").alias(PROTEIN_U),
                     pl.col("altB").str.extract(r"cygd:([a-zA-Z0-9]+)").alias(PROTEIN_V),
                     pl.col("pmids").str.extract(r"pubmed:(\d+)$").alias(PUBMED),
-                    # pl.col("author").str.extract(r"([12][0-9]{3})").alias("YEAR"),
+                    pl.col("author").str.extract(r"([12][0-9]{3})").alias("YEAR"),
                 ]
             )
-            # .filter(pl.col("YEAR") < "2012")
+            .filter(pl.col("YEAR") < "2012")
             .select([PROTEIN_U, PROTEIN_V, PUBMED])
             .with_columns(sort_prot_cols(PROTEIN_U, PROTEIN_V))
             .unique(maintain_order=True)

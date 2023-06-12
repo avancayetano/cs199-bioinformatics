@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import polars as pl
 import seaborn as sns
 
-from aliases import FEATURES, IS_CO_COMP, IS_NIP, PROTEIN_U, PROTEIN_V
+from aliases import FEATURES, IS_CO_COMP, IS_NIP, PROTEIN_U, PROTEIN_V, TOPO
 from model_preprocessor import ModelPreprocessor
 from utils import construct_composite_network, get_cyc_comp_pairs
 
@@ -89,15 +89,18 @@ class ExploratoryDataAnalysis:
             has_header=False,
             new_columns=[PROTEIN_U, PROTEIN_V],
         )
+        df_ppin = self.df_composite.filter(pl.col(TOPO) > 0)
         df_labeled = self.model_prep.label_composite(
-            self.df_composite,
+            df_ppin,
             df_nip_pairs,
             label,
             mode="all",
             balanced=False,
         )
 
-        df_feat_labeled = self.df_composite.join(df_labeled, on=[PROTEIN_U, PROTEIN_V])
+        df_feat_labeled = self.df_composite.join(
+            df_labeled, on=[PROTEIN_U, PROTEIN_V], how="inner"
+        )
         df_pd_display = df_feat_labeled.melt(
             id_vars=[PROTEIN_U, PROTEIN_V, label],
             variable_name="FEATURE",
@@ -106,7 +109,7 @@ class ExploratoryDataAnalysis:
 
         plt.figure()
         ax = sns.barplot(data=df_pd_display, x="FEATURE", y="VALUE", hue=label)
-        ax.set_title("Mean feature values of NIP and non-NIP pairs.")
+        ax.set_title("Mean feature values of NIP and PPI pairs.")
 
     def nip_co_comp_intersection(self):
         PAIR_TYPE = "PAIR_TYPE"
@@ -174,18 +177,50 @@ class ExploratoryDataAnalysis:
         ax = sns.barplot(data=df_pd_display, x="FEATURE", y="VALUE", hue=PAIR_TYPE)
         ax.set_title("Mean feature values of pair type groups.")
 
+    def explore_co_comp_pairs(self):
+        INTERACTING = "INTERACTING"
+        df_complex_pairs = get_cyc_comp_pairs()
+        df_ppin = (
+            self.df_composite.filter(pl.col(TOPO) > 0)
+            .select([PROTEIN_U, PROTEIN_V])
+            .with_columns(pl.lit(True).alias(INTERACTING))
+        )
+
+        df_ppi_pairs = df_complex_pairs.join(
+            df_ppin, on=[PROTEIN_U, PROTEIN_V], how="left"
+        ).fill_null(pl.lit(False))
+
+        n_ppi = df_ppi_pairs.filter(pl.col(INTERACTING) == True).shape[0]
+        n_non_ppi = df_ppi_pairs.shape[0] - n_ppi
+
+        df_pd_display = (
+            self.df_composite.join(df_ppi_pairs, on=[PROTEIN_U, PROTEIN_V], how="inner")
+            .melt(
+                id_vars=[PROTEIN_U, PROTEIN_V, INTERACTING],
+                variable_name="FEATURE",
+                value_name="VALUE",
+            )
+            .to_pandas()
+        )
+        plt.figure()
+        ax = sns.barplot(data=df_pd_display, x="FEATURE", y="VALUE", hue=INTERACTING)
+        ax.set_title(
+            f"Mean feature values of CYC2008 complex pairs.\n Non-interacting: {n_ppi} | Interacting: {n_non_ppi}"
+        )
+
     def main(self):
         print(self.df_composite.select(self.features).describe())
         self.df_composite = self.model_prep.normalize_features(
             self.df_composite, self.features
         )
         print(self.df_composite.select(self.features).describe())
-        # self.features_heatmap()
-        # self.features_dist_hist()
+        self.features_heatmap()
+        self.features_dist_hist()
         self.explore_co_complexes()
-        # self.explore_nip_pairs()
+        self.explore_nip_pairs()
 
-        # self.nip_co_comp_intersection()
+        self.nip_co_comp_intersection()
+        self.explore_co_comp_pairs()
         plt.show()
 
 

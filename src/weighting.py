@@ -99,9 +99,9 @@ if __name__ == "__main__":
     df_composite = model_prep.normalize_features(df_composite, features)
 
     # Weighting Models
-    rf = CoCompClassifier(RandomForestClassifier(), "rf")
-    cnb = CoCompClassifier(CategoricalNB(), "cnb")
-    mlp = CoCompClassifier(MLPClassifier(max_iter=3000), "mlp")
+    rf = CoCompClassifier(RandomForestClassifier(), "RF")
+    cnb = CoCompClassifier(CategoricalNB(), "CNB")
+    mlp = CoCompClassifier(MLPClassifier(max_iter=3000), "MLP")
 
     evaluator = Evaluator()
 
@@ -177,7 +177,7 @@ if __name__ == "__main__":
 
         # Evaluate SWC as well
         df_swc_eval = evaluator.evaluate_co_comp_classifier(
-            "swc", df_w_swc, df_test_labeled, df_all_labeled, IS_CO_COMP
+            "SWC", df_w_swc, df_test_labeled, df_all_labeled, IS_CO_COMP
         )
 
         print()

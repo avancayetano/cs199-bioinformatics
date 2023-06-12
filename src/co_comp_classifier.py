@@ -107,13 +107,13 @@ class CoCompClassifier:
         )
 
         df_w_composite.write_csv(
-            f"../data/weighted/all_edges/cross_val/{self.name}_iter{xval_iter}.csv",
+            f"../data/weighted/all_edges/cross_val/{self.name.lower()}_iter{xval_iter}.csv",
             has_header=False,
             separator="\t",
         )
 
         df_w_composite.sort(pl.col(WEIGHT), descending=True).head(20_000).write_csv(
-            f"../data/weighted/20k_edges/cross_val/{self.name}_20k_iter{xval_iter}.csv",
+            f"../data/weighted/20k_edges/cross_val/{self.name.lower()}_20k_iter{xval_iter}.csv",
             has_header=False,
             separator="\t",
         )
