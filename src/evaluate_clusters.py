@@ -3,10 +3,12 @@
 import time
 from typing import Dict, List, Literal, NotRequired, Set, Tuple, TypedDict, Union
 
+import matplotlib.pyplot as plt
 import polars as pl
-from sklearn.metrics import auc
+import seaborn as sns
+from sklearn.metrics import PrecisionRecallDisplay, auc
 
-from aliases import FEATURES, PROTEIN_U, PROTEIN_V, SUPER_FEATS, WEIGHT
+from aliases import FEATURES, PROTEIN_U, PROTEIN_V, SCENARIO, SUPER_FEATS, WEIGHT
 from assertions import assert_prots_sorted
 from utils import get_clusters_list, get_complexes_list
 
@@ -23,6 +25,8 @@ MATCH_THRESH = "MATCH_THRESH"
 DENS_THRESH = "DENS_THRESH"
 
 AUC = "AUC"
+AVG_AUC = "AVG_AUC"
+SCENARIO = SCENARIO
 
 Subgraphs = List[Set[str]]
 ScoredCluster = TypedDict(
@@ -469,15 +473,58 @@ class ClusterEvaluator:
         df_20k_050 = self.get_prec_recall_curve(df_cluster_evals, "20k_edges", 0.5)
         df_20k_075 = self.get_prec_recall_curve(df_cluster_evals, "20k_edges", 0.75)
 
-        df_all_050_auc = self.get_prec_recall_auc(df_all_050)
-        df_all_075_auc = self.get_prec_recall_auc(df_all_075)
-        df_20k_050_auc = self.get_prec_recall_auc(df_20k_050)
-        df_20k_075_auc = self.get_prec_recall_auc(df_20k_075)
+        df_all_050_auc = self.get_prec_recall_auc(df_all_050, "all_050")
+        df_all_075_auc = self.get_prec_recall_auc(df_all_075, "all_075")
+        df_20k_050_auc = self.get_prec_recall_auc(df_20k_050, "20k_050")
+        df_20k_075_auc = self.get_prec_recall_auc(df_20k_075, "20k_075")
 
-        print(df_all_050_auc)
-        print(df_all_075_auc)
-        print(df_20k_050_auc)
-        print(df_20k_075_auc)
+        # Print AUC summary of the four scenarios
+        df_auc_summary = (
+            pl.concat(
+                [df_all_050_auc, df_all_075_auc, df_20k_050_auc, df_20k_075_auc],
+                how="vertical",
+            )
+            .pivot(
+                values=AUC, index=METHOD, columns=SCENARIO, aggregate_function="first"
+            )
+            .with_columns((pl.sum(pl.all().exclude(METHOD)) / 4).alias(AVG_AUC))
+        )
+        print(df_auc_summary.sort(AVG_AUC, descending=True))
+
+        n_methods = 7
+        df_top_methods = (
+            df_auc_summary.sort(AVG_AUC, descending=True).select(METHOD).head(n_methods)
+        )
+        # Plot the four curves
+        self.plot_prec_recall_curve(
+            df_all_050, df_top_methods, f"all edges, match_thresh=0.5"
+        )
+        self.plot_prec_recall_curve(
+            df_all_075, df_top_methods, f"all edges, match_thresh=0.75"
+        )
+        self.plot_prec_recall_curve(
+            df_20k_050, df_top_methods, f"20k edges, match_thresh=0.5"
+        )
+        self.plot_prec_recall_curve(
+            df_20k_075, df_top_methods, f"20k edges, match_thresh=0.75"
+        )
+        plt.show()
+
+    def plot_prec_recall_curve(
+        self, df: pl.DataFrame, df_top_methods: pl.DataFrame, scenario: str
+    ):
+        plt.figure()
+        df_display = df.join(df_top_methods, on=METHOD, how="inner")
+        sns.lineplot(
+            data=df_display,
+            x=RECALL,
+            y=PREC,
+            hue=METHOD,
+            errorbar=None,
+            markers=True,
+            marker="o",
+        )
+        plt.title(f"Precision-Recall curve on {scenario}")
 
     def get_prec_recall_curve(
         self, df_cluster_evals: pl.DataFrame, n_edges: str, match_thresh: float
@@ -497,7 +544,9 @@ class ClusterEvaluator:
 
         return df_prec_recall
 
-    def get_prec_recall_auc(self, df_prec_recall: pl.DataFrame) -> pl.DataFrame:
+    def get_prec_recall_auc(
+        self, df_prec_recall: pl.DataFrame, scenario: str
+    ) -> pl.DataFrame:
         df_auc = (
             df_prec_recall.lazy()
             .groupby(METHOD, maintain_order=True)
@@ -511,7 +560,7 @@ class ClusterEvaluator:
                 )
                 .alias(AUC)
             )
-            .sort(AUC, descending=True)
+            .with_columns(pl.lit(scenario).alias(SCENARIO))
             .collect()
         )
 
@@ -528,6 +577,7 @@ class ClusterEvaluator:
 if __name__ == "__main__":
     pl.Config.set_tbl_cols(30)
     pl.Config.set_tbl_rows(21)
+    sns.set_palette("deep")
     start = time.time()
     inflations = [3, 4]
     edges = ["20k_edges", "all_edges"]
@@ -535,8 +585,8 @@ if __name__ == "__main__":
         f.lower() for f in FEATURES + list(map(lambda sf: sf["name"], SUPER_FEATS))
     ]
     sv_methods = ["cnb", "rf", "mlp", "swc"]
-    n_dens = 5
-    n_iters = 2
+    n_dens = 50
+    n_iters = 1
 
     cluster_eval = ClusterEvaluator(
         inflations=inflations,
@@ -547,5 +597,5 @@ if __name__ == "__main__":
         n_iters=n_iters,
     )
 
-    cluster_eval.main(re_eval=True)
+    cluster_eval.main(re_eval=False)
     print(f"Execution Time: {time.time() - start}")
