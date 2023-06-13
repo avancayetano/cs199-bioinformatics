@@ -15,6 +15,7 @@ from aliases import (
     PROTEIN_V,
     WEIGHT,
 )
+from assertions import assert_no_zero_weight
 
 WeightingModel = Union[RandomForestClassifier, CategoricalNB, MLPClassifier]
 
@@ -96,7 +97,6 @@ class CoCompClassifier:
     def main(
         self, df_composite: pl.DataFrame, df_train_labeled: pl.DataFrame, xval_iter: int
     ) -> pl.DataFrame:
-        print()
         df_w_composite = self.weight(df_composite, df_train_labeled, xval_iter)
 
         df_w_composite = (
@@ -112,11 +112,12 @@ class CoCompClassifier:
             separator="\t",
         )
 
-        df_w_composite.sort(pl.col(WEIGHT), descending=True).head(20_000).write_csv(
+        df_w_20k = df_w_composite.sort(pl.col(WEIGHT), descending=True).head(20_000)
+        assert_no_zero_weight(df_w_20k)
+        df_w_20k.write_csv(
             f"../data/weighted/20k_edges/cross_val/{self.name.lower()}_20k_iter{xval_iter}.csv",
             has_header=False,
             separator="\t",
         )
-        print()
 
         return df_w_composite

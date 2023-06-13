@@ -23,7 +23,7 @@ from aliases import (
     TOPO,
     WEIGHT,
 )
-from assertions import assert_df_bounded
+from assertions import assert_df_bounded, assert_no_zero_weight
 from co_comp_classifier import CoCompClassifier
 from evaluator import Evaluator
 from model_preprocessor import ModelPreprocessor
@@ -47,7 +47,10 @@ class FeatureWeighting:
             has_header=False,
             separator="\t",
         )
-        df_w_composite.sort(pl.col(WEIGHT), descending=True).head(20_000).write_csv(
+
+        df_w_20k = df_w_composite.sort(pl.col(WEIGHT), descending=True).head(20_000)
+        assert_no_zero_weight(df_w_20k)
+        df_w_20k.write_csv(
             f"../data/weighted/20k_edges/features/{name.lower()}_20k.csv",
             has_header=False,
             separator="\t",

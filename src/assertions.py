@@ -2,7 +2,7 @@ from typing import List, Literal, Union
 
 import polars as pl
 
-from aliases import PROTEIN_U, PROTEIN_V
+from aliases import PROTEIN_U, PROTEIN_V, WEIGHT
 
 
 def assert_prots_sorted(df: pl.DataFrame):
@@ -38,3 +38,7 @@ def assert_no_null(df: pl.DataFrame, cols: Union[List[str], Literal["*"]] = "*")
         .item()
     )
     assert null_count == 0
+
+
+def assert_no_zero_weight(df: pl.DataFrame):
+    assert df.filter(pl.col(WEIGHT) == 0).shape[0] == 0

@@ -3,6 +3,7 @@
 from typing import Dict, List, Literal, NotRequired, Set, TypedDict, Union
 
 import polars as pl
+from sklearn.metrics import auc
 
 from aliases import FEATURES, PROTEIN_U, PROTEIN_V, SUPER_FEATS, WEIGHT
 from assertions import assert_prots_sorted
@@ -14,13 +15,13 @@ METHOD = "METHOD"
 XVAL_ITER = "XVAL_ITER"
 
 N_CLUSTERS = "N_CLUSTERS"
-PREC_NUM = "PREC_NUM"
-RECALL_NUM = "RECALL_NUM"
 PREC = "PREC"
 RECALL = "RECALL"
 F_SCORE = "F_SCORE"
 MATCH_THRESH = "MATCH_THRESH"
 DENS_THRESH = "DENS_THRESH"
+
+AUC = "AUC"
 
 Subgraphs = List[Set[str]]
 
@@ -65,17 +66,32 @@ SvWeighted = TypedDict(
 
 
 class ClusterEvaluator:
-    def __init__(self):
-        self.inflations = [4]
-        self.n_iters = 2
+    def __init__(
+        self,
+        inflations: List[int],
+        edges: List[str],
+        feat_methods: List[str],
+        sv_methods: List[str],
+        n_dens: int,
+        n_iters: int,
+    ):
+        self.inflations = inflations
+        self.n_dens = n_dens
+        self.n_iters = n_iters
 
-        self.edges = ["20k_edges", "all_edges"]
-        self.feat_methods = [
-            f.lower() for f in FEATURES + list(map(lambda sf: sf["name"], SUPER_FEATS))
-        ]
-        self.sv_methods = ["cnb", "rf", "mlp", "swc"]
+        self.edges = edges
+        self.feat_methods = feat_methods
+        self.sv_methods = sv_methods
+
+        self.methods = ["unweighted"] + self.feat_methods + self.sv_methods
 
         self.cache_eval_data()
+
+        # to track the progress
+        self.idx = 0
+        self.total = (
+            len(self.inflations) * (n_dens + 1) * n_iters * 2 * len(self.methods) * 2
+        )
 
     def get_cluster_filename(
         self,
@@ -192,82 +208,30 @@ class ClusterEvaluator:
         """
 
         print("Evaluating protein complex prediction")
+        dens_thresholds = [0.0] + [(i + 1) / self.n_dens for i in range(self.n_dens)]
+
+        evals: List[Dict[str, str | float | int]] = []
+
         for inflation in self.inflations:
-            self.prec_recall_curves(inflation)
-
-    def prec_recall_curves(self, inflation: int):
-        """
-        Four precision-recall curves
-        - all_edges, match_thresh = 0.5
-        - all_edges, match_thresh = 0.75
-        - 20k_edges, match_thresh = 0.5
-        - 20k_edges, match_thresh = 0.75
-
-        Args:
-            inflation (int): _description_
-
-        Returns:
-            pl.DataFrame: _description_
-        """
-
-        curves: List[Dict[str, Union[str, float]]] = []
-        evals_20k_edges: List[Dict[str, Union[str, float]]] = []
-
-        n_dens = 0
-        dens_thresholds = [0.0] + [(i + 1) / n_dens for i in range(n_dens)]
-        print(dens_thresholds)
-
-        evals = []
-        for dens_thresh in dens_thresholds:
-            print(f"dens_thresh = {dens_thresh}")
-            for xval_iter in range(self.n_iters):
-                evals_all_edges = self.evaluate_clusters(
-                    inflation,
-                    "all_edges",
-                    dens_thresh,
-                    xval_iter,
-                )
-                evals_20k_edges = self.evaluate_clusters(
-                    inflation,
-                    "20k_edges",
-                    dens_thresh,
-                    xval_iter,
-                )
-                evals.extend(evals_all_edges)
-                evals.extend(evals_20k_edges)
+            for dens_thresh in dens_thresholds:
+                for xval_iter in range(self.n_iters):
+                    evals_all_edges = self.evaluate_clusters(
+                        inflation,
+                        "all_edges",
+                        dens_thresh,
+                        xval_iter,
+                    )
+                    evals_20k_edges = self.evaluate_clusters(
+                        inflation,
+                        "20k_edges",
+                        dens_thresh,
+                        xval_iter,
+                    )
+                    evals.extend(evals_all_edges)
+                    evals.extend(evals_20k_edges)
 
         df_evals = pl.DataFrame(evals)
-        print(df_evals)
-        df_evals.write_csv("evals_temp.csv", has_header=True)
-        # get the average of all the methods in all the cross-validation iterations
-
-        # print("Evaluations for clusters using all edges")
-        # df_evals_all_edges = (
-        #     pl.DataFrame(evals_all_edges)
-        #     .groupby([METHOD, MATCH_THRESH], maintain_order=True)
-        #     .mean()
-        # )
-        # print("On match threshold >= 0.5")
-        # print(df_evals_all_edges.filter(pl.col(MATCH_THRESH) == 0.5))
-
-        # print("On match threshold >= 0.75")
-        # print(df_evals_all_edges.filter(pl.col(MATCH_THRESH) == 0.75))
-        # print()
-
-        # print("Evaluations for clusters using 20k edges")
-        # df_evals_20k_edges = (
-        #     pl.DataFrame(evals_20k_edges)
-        #     .groupby([METHOD, MATCH_THRESH], maintain_order=True)
-        #     .mean()
-        # )
-        # print("On match threshold >= 0.5")
-        # print(df_evals_20k_edges.filter(pl.col(MATCH_THRESH) == 0.5))
-
-        # print("On match threshold >= 0.75")
-        # print(df_evals_20k_edges.filter(pl.col(MATCH_THRESH) == 0.75))
-        # print()
-
-        # return curve_all, curve_20k
+        df_evals.write_csv("../data/evals/cluster_evals.csv", has_header=True)
 
     def evaluate_clusters(
         self,
@@ -278,7 +242,7 @@ class ClusterEvaluator:
     ) -> List[Dict[str, Union[str, float, int]]]:
         evals: List[Dict[str, Union[str, float, int]]] = []
 
-        for method in self.feat_methods + self.sv_methods:
+        for method in self.methods:
             metrics_050 = self.get_complex_prediction_metrics(
                 inflation=inflation,
                 n_edges=n_edges,
@@ -296,8 +260,9 @@ class ClusterEvaluator:
                 match_thresh=0.75,
             )
             evals.extend([metrics_050, metrics_075])
+            self.idx += 2
             print(
-                f"Done evaluating {method} clusters on {n_edges}. dens_thresh={dens_thresh}. xval_iter={xval_iter}"
+                f"[{self.idx}/{self.total}]Done evaluating {method} clusters on {n_edges}. dens_thresh={dens_thresh}. xval_iter={xval_iter}"
             )
 
         return evals
@@ -376,9 +341,10 @@ class ClusterEvaluator:
         prec_numerator = len(
             list(
                 filter(
-                    lambda cluster: self.there_is_match(
-                        cluster, test_complexes, match_thresh
-                    ),
+                    lambda cluster: (
+                        not self.there_is_match(cluster, train_complexes, match_thresh)
+                    )
+                    and (self.there_is_match(cluster, test_complexes, match_thresh)),
                     clusters,
                 )
             )
@@ -395,7 +361,12 @@ class ClusterEvaluator:
                 )
             )
         )
-        prec = prec_numerator / prec_denominator
+
+        prec = (
+            prec_numerator / prec_denominator
+            if prec_denominator + prec_numerator > 0
+            else 0
+        )
 
         # Computing the recall
         recall_numerator = len(
@@ -426,18 +397,83 @@ class ClusterEvaluator:
             DENS_THRESH: dens_thresh,
             MATCH_THRESH: match_thresh,
             N_CLUSTERS: n_clusters,
-            PREC_NUM: prec_numerator,
-            RECALL_NUM: recall_numerator,
             PREC: prec,
             RECALL: recall,
             F_SCORE: f_score,
         }
 
-    def main(self):
-        self.evaluate_complex_prediction()
+    def prec_recall_curves(self):
+        """
+        Four precision-recall curves per inflation setting
+        - all_edges, match_thresh = 0.5
+        - all_edges, match_thresh = 0.75
+        - 20k_edges, match_thresh = 0.5
+        - 20k_edges, match_thresh = 0.75
+        """
+        df_cluster_evals = pl.read_csv("../data/evals/cluster_evals.csv")
+
+        curves = {}
+        auc_vals = {}
+
+        for inflation in self.inflations:
+            curves[inflation] = {}
+
+            df_all_050 = (
+                df_cluster_evals.lazy()
+                .filter(
+                    (pl.col(INFLATION) == inflation)
+                    & (pl.col(N_EDGES) == "all_edges")
+                    & (pl.col(MATCH_THRESH) == 0.5)
+                )
+                .select(pl.exclude([INFLATION, N_EDGES, MATCH_THRESH, XVAL_ITER]))
+                .groupby([METHOD, DENS_THRESH])
+                .mean()
+                .sort([METHOD, DENS_THRESH])
+                .collect()
+            )
+
+            df_all_050_auc = (
+                df_all_050.groupby(METHOD, maintain_order=True)
+                .agg(
+                    pl.struct([PREC, RECALL])
+                    .apply(
+                        lambda prec_recall: auc(
+                            prec_recall.struct.field(RECALL),
+                            prec_recall.struct.field(PREC),
+                        )
+                    )
+                    .alias(AUC)
+                )
+                .sort(AUC, descending=True)
+            )
+
+            print(df_all_050_auc)
+
+    def main(self, re_eval: bool = True):
+        if re_eval:
+            self.evaluate_complex_prediction()
+
+        self.prec_recall_curves()
 
 
 if __name__ == "__main__":
     pl.Config.set_tbl_cols(30)
-    cluster_eval = ClusterEvaluator()
-    cluster_eval.main()
+
+    inflations = [4]
+    edges = ["20k_edges", "all_edges"]
+    feat_methods = [
+        f.lower() for f in FEATURES + list(map(lambda sf: sf["name"], SUPER_FEATS))
+    ]
+    sv_methods = ["cnb", "rf", "mlp", "swc"]
+    n_dens = 10
+    n_iters = 2
+
+    cluster_eval = ClusterEvaluator(
+        inflations=inflations,
+        edges=edges,
+        feat_methods=feat_methods,
+        sv_methods=sv_methods,
+        n_dens=n_dens,
+        n_iters=n_iters,
+    )
+    cluster_eval.main(re_eval=False)
