@@ -28,7 +28,7 @@ TOPO_L2 = "TOPO_L2"  # Topological weighting - Iterative AdjustCD (k=2) Level-2 
 STRING = "STRING"  # STRING database score
 CO_OCCUR = "CO_OCCUR"  # Co-ocurrence in PubMed literature
 
-
+SWC_FEATS = [TOPO, TOPO_L2, STRING, CO_OCCUR]
 FEATURES = [TOPO, TOPO_L2, STRING, CO_OCCUR, REL, CO_EXP, GO_CC, GO_BP, GO_MF]
 
 # Super features (for unsupervised weighting)

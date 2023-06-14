@@ -3,9 +3,10 @@
 from typing import Union
 
 import polars as pl
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier
 from sklearn.naive_bayes import CategoricalNB
 from sklearn.neural_network import MLPClassifier
+from sklearn.pipeline import Pipeline
 
 from aliases import (
     IS_CO_COMP,
@@ -17,7 +18,13 @@ from aliases import (
 )
 from assertions import assert_no_zero_weight
 
-WeightingModel = Union[RandomForestClassifier, CategoricalNB, MLPClassifier]
+WeightingModel = Union[
+    RandomForestClassifier,
+    CategoricalNB,
+    MLPClassifier,
+    Pipeline,
+    VotingClassifier,
+]
 
 
 class CoCompClassifier:
@@ -70,6 +77,13 @@ class CoCompClassifier:
         print(
             f"Train samples: {n_samples} | Co-comp: {co_comp_samples} | Non-co-comp: {non_co_comp_samples}"
         )
+        # For reproducability
+        if type(self.model) == VotingClassifier:
+            for _, model in self.model.estimators:
+                model.set_params(random_state=xval_iter)
+        else:
+            self.model.set_params(random_state=xval_iter)
+
         self.model.fit(X_train, y_train)  # training the model
         print("Training done!")
 
@@ -97,6 +111,7 @@ class CoCompClassifier:
     def main(
         self, df_composite: pl.DataFrame, df_train_labeled: pl.DataFrame, xval_iter: int
     ) -> pl.DataFrame:
+        print()
         df_w_composite = self.weight(df_composite, df_train_labeled, xval_iter)
 
         df_w_composite = (
@@ -119,5 +134,6 @@ class CoCompClassifier:
             has_header=False,
             separator="\t",
         )
+        print()
 
         return df_w_composite

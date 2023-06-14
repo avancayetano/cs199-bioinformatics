@@ -220,3 +220,24 @@ def get_cyc_train_test_comp_pairs(iter: int) -> Tuple[pl.DataFrame, pl.DataFrame
     df_test = get_cyc_comp_pairs(df_test_ids)
 
     return df_train, df_test
+
+
+def get_cluster_filename(
+    n_edges: str, method: str, supervised: bool, inflation: int, iter: str = ""
+):
+    if method == "unweighted":
+        return f"../data/clusters/out.{method}.csv.I{inflation}0"
+
+    suffix = "_20k" if n_edges == "20k_edges" else ""
+    if supervised:
+        return f"../data/clusters/{n_edges}/cross_val/out.{method}{suffix}{iter}.csv.I{inflation}0"
+    return f"../data/clusters/{n_edges}/features/out.{method}{suffix}.csv.I{inflation}0"
+
+
+def get_weighted_filename(method: str, supervised: bool, iter: str = ""):
+    if method == "unweighted":
+        return f"../data/weighted/{method}.csv"
+
+    if supervised:
+        return f"../data/weighted/all_edges/cross_val/{method}{iter}.csv"
+    return f"../data/weighted/all_edges/features/{method}.csv"
