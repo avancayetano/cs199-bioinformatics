@@ -1,8 +1,9 @@
 # pyright: basic
 
-from typing import Union
+from typing import List, Union
 
 import polars as pl
+from sklearn.base import BaseEstimator
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
 from sklearn.naive_bayes import CategoricalNB
 from sklearn.neural_network import MLPClassifier
@@ -18,7 +19,7 @@ from aliases import (
 )
 from assertions import assert_no_zero_weight
 
-WeightingModel = Union[
+Model = Union[
     RandomForestClassifier,
     CategoricalNB,
     MLPClassifier,
@@ -27,14 +28,14 @@ WeightingModel = Union[
 ]
 
 
-class CoCompClassifier:
+class SupervisedWeighting:
     """
-    Co-complex classifier.
+    Supervised co-complex probability weighting method.
     """
 
     def __init__(
         self,
-        model: WeightingModel,
+        model: Model,
         name: str,
     ):
         self.label = IS_CO_COMP
@@ -79,11 +80,16 @@ class CoCompClassifier:
         )
         # For reproducability
         if type(self.model) == VotingClassifier:
-            for _, model in self.model.estimators:
-                model.set_params(random_state=xval_iter)
+            for _, model in self.model.estimators:  # type: ignore
+                try:
+                    model.set_params(random_state=xval_iter)
+                except:
+                    pass
         else:
-            self.model.set_params(random_state=xval_iter)
-
+            try:
+                self.model.set_params(random_state=xval_iter)
+            except:
+                pass
         self.model.fit(X_train, y_train)  # training the model
         print("Training done!")
 

@@ -1,5 +1,6 @@
 # pyright: basic
 
+import os
 from typing import Dict, List, Literal, Tuple, Union
 
 import polars as pl
@@ -66,7 +67,14 @@ class ModelPreprocessor:
     ) -> pl.DataFrame:
         print()
         print("Discretizing the features (only for models that need discrete values)")
-        self.learn_discretization(df_composite, df_labeled, features, label, xval_iter)
+        if not os.path.exists(f"../data/training/discretized_bins_iter{xval_iter}.csv"):
+            self.learn_discretization(
+                df_composite, df_labeled, features, label, xval_iter
+            )
+        else:
+            print(
+                f"Using discretized data from data/training/discretized_bins_iter{xval_iter}.csv"
+            )
         cuts, selected_feats = self.get_cuts(xval_iter)
 
         df_composite_binned = df_composite.select(

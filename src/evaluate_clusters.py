@@ -65,12 +65,14 @@ AllUnwClusters = Dict[int, ScoredClusters]
 FeatWeighted = Dict[str, pl.DataFrame]
 SvWeighted = Dict[str, Dict[int, pl.DataFrame]]
 
+Edges = List[Union[Literal["20k_edges"], Literal["all_edges"]]]
+
 
 class ClusterEvaluator:
     def __init__(
         self,
         inflations: List[int],
-        edges: List[str],
+        edges: Edges,
         feat_methods: List[str],
         sv_methods: List[str],
         n_dens: int,
@@ -169,9 +171,9 @@ class ClusterEvaluator:
         ) + len(self.inflations)
 
         for I in self.inflations:
-            feat_clusters[I] = {}
-            sv_clusters[I] = {}
-            unw_clusters[I] = {}
+            feat_clusters[I] = {}  # type: ignore
+            sv_clusters[I] = {}  # type: ignore
+            unw_clusters[I] = {}  # type: ignore
 
             for e in self.edges:
                 feat_clusters[I][e] = {}
@@ -541,7 +543,7 @@ if __name__ == "__main__":
     sns.set_palette("deep")
     start = time.time()
     inflations = [4]
-    edges = ["20k_edges"]
+    edges: Edges = ["20k_edges"]
     feat_methods = [
         f.lower() for f in FEATURES + list(map(lambda sf: sf["name"], SUPER_FEATS))
     ]

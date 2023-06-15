@@ -5,15 +5,7 @@ from typing import List
 import matplotlib.pyplot as plt
 import polars as pl
 import seaborn as sns
-from sklearn.base import BaseEstimator, ClassifierMixin
-from sklearn.ensemble import (
-    ExtraTreesClassifier,
-    RandomForestClassifier,
-    StackingClassifier,
-    VotingClassifier,
-)
-from sklearn.feature_selection import SelectFromModel
-from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier
 from sklearn.naive_bayes import CategoricalNB
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
@@ -36,9 +28,9 @@ from aliases import (
     WEIGHT,
 )
 from assertions import assert_df_bounded, assert_no_zero_weight
-from co_comp_classifier import CoCompClassifier
 from evaluator import Evaluator
 from model_preprocessor import ModelPreprocessor
+from supervised_weighting import SupervisedWeighting
 from utils import construct_composite_network, get_cyc_train_test_comp_pairs
 
 
@@ -112,17 +104,12 @@ if __name__ == "__main__":
     features = FEATURES[:]
     model_prep = ModelPreprocessor()
     df_composite = model_prep.normalize_features(df_composite, features)
-    df_composite_swc = model_prep.normalize_features(df_composite, SWC_FEATS).select(
-        [PROTEIN_U, PROTEIN_V, *SWC_FEATS]
-    )
 
     # Weighting Models
-    rf = CoCompClassifier(RandomForestClassifier(), "RF")
-    cnb = CoCompClassifier(CategoricalNB(), "CNB")
-    mlp = CoCompClassifier(MLPClassifier(max_iter=3000), "MLP")
-    rf_swc = CoCompClassifier(RandomForestClassifier(), "RF_SWC")
-
-    rf_mlp_vote = CoCompClassifier(
+    cnb = SupervisedWeighting(CategoricalNB(), "CNB")
+    rf = SupervisedWeighting(RandomForestClassifier(), "RF")
+    mlp = SupervisedWeighting(MLPClassifier(max_iter=3000), "MLP")
+    rf_mlp = SupervisedWeighting(
         VotingClassifier(
             estimators=[
                 ("rf", RandomForestClassifier()),
@@ -130,18 +117,7 @@ if __name__ == "__main__":
             ],
             voting="soft",
         ),
-        "RF_MLP_VOTE",
-    )
-
-    rf_mlp_stack = CoCompClassifier(
-        StackingClassifier(
-            estimators=[
-                ("rf", RandomForestClassifier()),
-            ],
-            final_estimator=MLPClassifier(max_iter=3000),
-            stack_method="predict_proba",
-        ),
-        "RF_MLP_STACK",
+        "RF_MLP",
     )
 
     evaluator = Evaluator()
@@ -162,14 +138,10 @@ if __name__ == "__main__":
             df_composite, df_train_pairs, IS_CO_COMP, xval_iter, "subset", False
         )
 
-        df_train_labeled_swc = model_prep.label_composite(
-            df_composite_swc, df_train_pairs, IS_CO_COMP, xval_iter, "subset", False
-        )
-
         # Discretize the network using MDLP
-        # df_composite_binned = model_prep.discretize_composite(
-        #     df_composite, df_train_labeled, features, IS_CO_COMP, xval_iter
-        # )
+        df_composite_binned = model_prep.discretize_composite(
+            df_composite, df_train_labeled, features, IS_CO_COMP, xval_iter
+        )
 
         # SWC cross-validation scores
         df_w_swc = pl.read_csv(
@@ -196,77 +168,62 @@ if __name__ == "__main__":
         )
 
         # Run the classifiers
-        # df_w_cnb = cnb.main(df_composite_binned, df_train_labeled, xval_iter)
+        df_w_cnb = cnb.main(df_composite_binned, df_train_labeled, xval_iter)
         df_w_rf = rf.main(df_composite, df_train_labeled, xval_iter)
         df_w_mlp = mlp.main(df_composite, df_train_labeled, xval_iter)
-        df_w_rf_mlp_vote = rf_mlp_vote.main(df_composite, df_train_labeled, xval_iter)
-        df_w_rf_mlp_stack = rf_mlp_stack.main(df_composite, df_train_labeled, xval_iter)
-        df_w_rf_swc = rf_swc.main(df_composite_swc, df_train_labeled_swc, xval_iter)
+        df_w_rf_mlp = rf_mlp.main(df_composite, df_train_labeled, xval_iter)
 
         # Preparing labeled data for performance evaluations
         df_test_labeled = model_prep.label_composite(
-            df_composite_swc, df_test_pairs, IS_CO_COMP, xval_iter, "all", False
+            df_composite, df_test_pairs, IS_CO_COMP, xval_iter, "all", False
         )
         df_all_pairs = pl.concat([df_train_pairs, df_test_pairs])
         df_all_labeled = model_prep.label_composite(
-            df_composite_swc, df_all_pairs, IS_CO_COMP, xval_iter, "all", False
+            df_composite, df_all_pairs, IS_CO_COMP, xval_iter, "all", False
         )
 
         # Evaluate the classifiers
-        # df_cnb_eval = evaluator.evaluate_co_comp_classifier(
-        #     cnb.name, df_w_cnb, df_test_labeled, df_all_labeled, IS_CO_COMP
-        # )
+        df_cnb_eval = evaluator.evaluate_co_comp_classifier(
+            cnb.name, df_w_cnb, df_test_labeled, df_all_labeled, IS_CO_COMP
+        )
         df_rf_eval = evaluator.evaluate_co_comp_classifier(
             rf.name, df_w_rf, df_test_labeled, df_all_labeled, IS_CO_COMP
         )
         df_mlp_eval = evaluator.evaluate_co_comp_classifier(
             mlp.name, df_w_mlp, df_test_labeled, df_all_labeled, IS_CO_COMP
         )
-        df_rf_mlp_vote_eval = evaluator.evaluate_co_comp_classifier(
-            rf_mlp_vote.name,
-            df_w_rf_mlp_vote,
-            df_test_labeled,
-            df_all_labeled,
-            IS_CO_COMP,
-        )
-        df_rf_mlp_stack_eval = evaluator.evaluate_co_comp_classifier(
-            rf_mlp_stack.name,
-            df_w_rf_mlp_stack,
+        df_rf_mlp_eval = evaluator.evaluate_co_comp_classifier(
+            rf_mlp.name,
+            df_w_rf_mlp,
             df_test_labeled,
             df_all_labeled,
             IS_CO_COMP,
         )
 
-        # # Evaluate SWC as well
+        # Evaluate SWC as well
         df_swc_eval = evaluator.evaluate_co_comp_classifier(
             "SWC", df_w_swc, df_test_labeled, df_all_labeled, IS_CO_COMP
         )
-        df_rf_swc_eval = evaluator.evaluate_co_comp_classifier(
-            rf_swc.name, df_w_rf_swc, df_test_labeled, df_all_labeled, IS_CO_COMP
-        )
+
         print()
         print(f"Evaluation summary of the models on xval_iter={xval_iter}")
 
         df_iter_evals = (
             pl.concat(
                 [
+                    df_cnb_eval,
                     df_rf_eval,
                     df_mlp_eval,
                     df_swc_eval,
-                    df_rf_swc_eval,
-                    df_rf_mlp_vote_eval,
-                    df_rf_mlp_stack_eval,
+                    df_rf_mlp_eval,
                 ]
             )
-            # pl.concat([df_cnb_eval, df_rf_eval, df_mlp_eval, df_swc_eval])
-            # pl.concat([df_rf_swc_eval, df_rf_eval, df_rf_mlp_eval])
-            # pl.concat([df_rf_eval, df_mlp_eval, df_swc_eval])
-            # pl.concat([df_mlp_eval, df_swc_eval])
             .melt(
                 id_vars=[MODEL, SCENARIO],
                 variable_name="ERROR_KIND",
                 value_name="ERROR_VAL",
-            ).pivot(
+            )
+            .pivot(
                 values="ERROR_VAL",
                 index=[MODEL, "ERROR_KIND"],
                 columns=SCENARIO,
@@ -275,22 +232,9 @@ if __name__ == "__main__":
             )
         )
         print(df_iter_evals)
-        # df_evals = pl.concat(
-        #     [df_evals, df_cnb_eval, df_rf_eval, df_mlp_eval, df_swc_eval]
-        # )
         df_evals = pl.concat(
-            [
-                df_rf_eval,
-                df_mlp_eval,
-                df_swc_eval,
-                df_rf_swc_eval,
-                df_rf_mlp_vote_eval,
-                df_rf_mlp_stack_eval,
-            ]
+            [df_evals, df_cnb_eval, df_rf_eval, df_mlp_eval, df_rf_mlp_eval]
         )
-
-        # df_evals = pl.concat([df_evals, df_rf_eval, df_mlp_eval, df_swc_eval])
-        # df_evals = pl.concat([df_evals, df_mlp_eval, df_swc_eval])
 
         print(f"------------------- END: ITER {xval_iter} ---------------------\n\n")
 
