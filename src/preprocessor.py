@@ -1,3 +1,4 @@
+import os
 import time
 from typing import Dict, List, Tuple, TypedDict
 
@@ -7,6 +8,7 @@ from aliases import (
     CO_OCCUR,
     COMP_ID,
     COMP_PROTEINS,
+    PROTEIN,
     PROTEIN_U,
     PROTEIN_V,
     PUBMED,
@@ -61,27 +63,85 @@ class Preprocessor:
 
         return df_swc
 
-    def get_ppin(self, df_swc: pl.DataFrame) -> pl.DataFrame:
-        """
-        Get the (L1) PPIN from SWC data.
+    def write_dip_proteins(self, df_dip_ppin_uniprot: pl.DataFrame) -> None:
+        if not os.path.exists("../data/databases/dip_uniprot_kegg_mapped.tsv"):
+            df_dip_uniprot_ids = (
+                df_dip_ppin_uniprot.melt(variable_name="PROTEIN_X", value_name=PROTEIN)
+                .select(PROTEIN)
+                .unique()
+            )
+            df_dip_uniprot_ids.write_csv(
+                "../data/databases/dip_uniprot_ids.csv", has_header=False
+            )
 
-        NOTE: Currently unused. Might delete later.
-
-        Args:
-            df_ppin (pl.DataFrame): _description_
-
-        Returns:
-            pl.DataFrame: _description_
-        """
-
-        df_ppin = (
-            df_swc.lazy()
-            .filter(pl.col(TOPO).is_not_null() & (pl.col(TOPO) > 0))
-            .select([PROTEIN_U, PROTEIN_V])
+    def read_dip_ppin_uniprot(self) -> pl.DataFrame:
+        INTERACTOR_A = "ID interactor A"
+        INTERACTOR_B = "ID interactor B"
+        df_dip_ppin_uniprot = (
+            pl.scan_csv(
+                "../data/databases/Scere20170205.txt",
+                has_header=True,
+                separator="\t",
+                null_values="-",
+            )
+            .filter(
+                pl.col("Taxid interactor A").str.contains("taxid:4932")
+                & pl.col("Taxid interactor B").str.contains("taxid:4932")
+            )
+            .select(
+                [
+                    pl.col(INTERACTOR_A).str.extract(r".+uniprotkb:(.+)"),
+                    pl.col(INTERACTOR_B).str.extract(r".+uniprotkb:(.+)"),
+                ]
+            )
+            .filter(
+                (pl.col(INTERACTOR_A) != pl.col(INTERACTOR_B))
+                & (pl.col(INTERACTOR_A).str.lengths() > 0)
+                & (pl.col(INTERACTOR_B).str.lengths() > 0)
+            )
+            .unique(maintain_order=True)
             .collect()
         )
 
-        return df_ppin
+        self.write_dip_proteins(df_dip_ppin_uniprot)
+
+        return df_dip_ppin_uniprot
+
+    def map_dip_ppin_uniprot_to_kegg(
+        self, df_dip_ppin_uniprot: pl.DataFrame
+    ) -> pl.DataFrame:
+        FROM = "From"
+        TO = "To"
+        INTERACTOR_A = "ID interactor A"
+        INTERACTOR_B = "ID interactor B"
+
+        if os.path.exists("../data/databases/dip_uniprot_kegg_mapped.tsv"):
+            lf_mapping = (
+                pl.scan_csv(
+                    "../data/databases/dip_uniprot_kegg_mapped.tsv",
+                    has_header=True,
+                    separator="\t",
+                )
+                .select([pl.col(FROM), pl.col(TO).str.extract(r"sce:(.+)")])
+                .filter(pl.col(TO).str.lengths() > 0)
+                .unique()
+            )
+
+            df_dip_ppin = (
+                df_dip_ppin_uniprot.lazy()
+                .join(lf_mapping, left_on=INTERACTOR_A, right_on=FROM, how="inner")
+                .join(lf_mapping, left_on=INTERACTOR_B, right_on=FROM, how="inner")
+                .rename({"To": PROTEIN_U, "To_right": PROTEIN_V})
+                .with_columns(sort_prot_cols(PROTEIN_U, PROTEIN_V))
+                .select([PROTEIN_U, PROTEIN_V])
+                .unique(maintain_order=True)
+                .collect()
+            )
+
+            return df_dip_ppin
+        else:
+            print("Please map the DIP uniprot IDs to KEGG ID, then rerun this script")
+            return pl.DataFrame()
 
     def get_nips(self) -> pl.DataFrame:
         """
@@ -94,7 +154,7 @@ class Preprocessor:
             pl.DataFrame: _description_
         """
 
-        df_mapping = (
+        lf_mapping = (
             pl.scan_csv("../data/databases/negatome_kegg_mapped.txt", separator="\t")
             .filter(pl.col("To").str.starts_with("sce:"))
             .with_columns(pl.col("To").str.replace("sce:", ""))
@@ -107,13 +167,13 @@ class Preprocessor:
                 separator="\t",
             )
             .rename({"column_1": "u", "column_2": "v"})
-            .join(df_mapping, left_on="u", right_on="From", how="inner")
-            .join(df_mapping, left_on="v", right_on="From", how="inner")
+            .join(lf_mapping, left_on="u", right_on="From", how="inner")
+            .join(lf_mapping, left_on="v", right_on="From", how="inner")
             .drop(["u", "v"])
             .rename({"To": "u", "To_right": "v"})
             .with_columns(sort_prot_cols("u", "v"))
             .select([PROTEIN_U, PROTEIN_V])
-            .unique()
+            .unique(maintain_order=True)
         ).collect()
 
         assert_prots_sorted(df_nips)
@@ -198,7 +258,7 @@ class Preprocessor:
         return df_cross_val
 
     def generate_cross_val_data(
-        self, df_complexes: pl.DataFrame
+        self, df_complexes: pl.DataFrame, seed: int = 12345
     ) -> Tuple[str, pl.DataFrame]:
         """
         Generate 10 rounds (iterations) of 10-fold cross-validation data.
@@ -216,7 +276,7 @@ class Preprocessor:
             df_complexes.filter(pl.col(COMP_PROTEINS).list.lengths() > 3)
             .select(pl.col(COMP_ID))
             .to_series()
-            .shuffle(seed=12345)
+            .shuffle(seed=seed)
             .to_list()
         )
 
@@ -227,11 +287,6 @@ class Preprocessor:
         return output, df_cross_val  # output is for the SWC software
 
     def read_irefindex(self) -> pl.DataFrame:
-        # physical_interactions = [
-        #     'psi-mi:"MI:0914"(association)',
-        #     'psi-mi:"MI:0915"(physical association)',
-        #     'psi-mi:"MI:0407"(direct interaction)',
-        # ]
         df = (
             pl.scan_csv(
                 "../data/databases/large/irefindex 559292 mitab26.txt", separator="\t"
@@ -244,8 +299,6 @@ class Preprocessor:
                     "pmids",
                     "taxa",
                     "taxb",
-                    # "interactionType",
-                    # "sourcedb",
                     "edgetype",
                 ]
             )
@@ -255,7 +308,6 @@ class Preprocessor:
                 & (pl.col("taxb").str.starts_with("taxid:559292"))
                 & (pl.col("altA").str.starts_with("cygd:"))
                 & (pl.col("altB").str.starts_with("cygd:"))
-                # & (pl.col("interactionType").is_in(physical_interactions))
             )
             .with_columns(
                 [
@@ -283,17 +335,32 @@ if __name__ == "__main__":
 
     preprocessor = Preprocessor()
     df_nips = preprocessor.get_nips()
+
     df_swc = preprocessor.read_swc_composite_network()
+    df_dip_ppin_uniprot = preprocessor.read_dip_ppin_uniprot()
+    df_dip_ppin = preprocessor.map_dip_ppin_uniprot_to_kegg(df_dip_ppin_uniprot)
+
     df_irefindex = preprocessor.read_irefindex()
 
     df_complexes = get_all_cyc_complexes()
     output, df_cross_val = preprocessor.generate_cross_val_data(df_complexes)
+
+    # generate a new cross-val split data for the DIP dataset
+    dip_output, df_dip_cross_val = preprocessor.generate_cross_val_data(
+        df_complexes, seed=6789
+    )
 
     print(">>> NIPS")
     print(df_nips)
 
     print(">>> SWC DATA - COMPOSITE PROTEIN NETWORK")
     print(df_swc)
+
+    print(">>> DIP PPIN UNIPROT")
+    print(df_dip_ppin_uniprot)
+
+    print(">>> DIP PPIN")
+    print(df_dip_ppin)
 
     print(">>> IREFINDEX")
     print(df_irefindex)
@@ -304,6 +371,9 @@ if __name__ == "__main__":
     print(">>> CROSS VAL DATA")
     print(df_cross_val)
 
+    print(">>> DIP CROSS VAL DATA")
+    print(df_dip_cross_val)
+
     # Write files...
     df_nips.write_csv("../data/preprocessed/yeast_nips.csv", has_header=False)
 
@@ -313,11 +383,23 @@ if __name__ == "__main__":
         "../data/preprocessed/swc_edges.csv", has_header=False
     )
 
+    df_dip_ppin_uniprot.write_csv(
+        "../data/databases/dip_ppin_uniprot.csv", has_header=False
+    )
+    df_dip_ppin.write_csv("../data/preprocessed/dip_ppin.csv", has_header=False)
+
     df_irefindex.write_csv("../data/preprocessed/irefindex_pubmed.csv", has_header=True)
 
     with open("../data/preprocessed/cross_val.csv", "w") as file:
         file.write(output)
     df_cross_val.write_csv("../data/preprocessed/cross_val_table.csv", has_header=True)
+
+    # Cross-val split data for DIP dataset
+    with open("../data/preprocessed/dip_cross_val.csv", "w") as file:
+        file.write(dip_output)
+    df_dip_cross_val.write_csv(
+        "../data/preprocessed/dip_cross_val_table.csv", has_header=True
+    )
 
     print(">>> Execution Time")
     print(time.time() - start_time)
