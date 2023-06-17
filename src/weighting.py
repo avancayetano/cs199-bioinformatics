@@ -1,14 +1,22 @@
 # pyright: basic
 
-from typing import List
+"""
+A script that weights the composite network.
+"""
+
+
+from typing import List, TypedDict
 
 import matplotlib.pyplot as plt
 import polars as pl
 import seaborn as sns
-from sklearn.ensemble import RandomForestClassifier, VotingClassifier
-from sklearn.naive_bayes import CategoricalNB
-from sklearn.neural_network import MLPClassifier
-from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    auc,
+    average_precision_score,
+    mean_squared_error,
+    precision_recall_curve,
+)
 
 from aliases import (
     CO_OCCUR,
@@ -26,12 +34,21 @@ from aliases import (
     TOPO,
     TOPO_L2,
     WEIGHT,
+    XVAL_ITER,
 )
 from assertions import assert_df_bounded, assert_no_zero_weight
-from evaluator import Evaluator
 from model_preprocessor import ModelPreprocessor
 from supervised_weighting import SupervisedWeighting
-from utils import construct_composite_network, get_cyc_train_test_comp_pairs
+from utils import (
+    construct_composite_network,
+    get_cyc_comp_pairs,
+    get_cyc_train_test_comp_pairs,
+)
+
+METHOD = "METHOD"
+AP = "AP"
+AUC = "AUC"
+RMSE = "RMSE"
 
 
 class FeatureWeighting:
@@ -66,7 +83,10 @@ class FeatureWeighting:
 if __name__ == "__main__":
     pl.Config.set_tbl_rows(15)
 
+    model_prep = ModelPreprocessor()
     df_composite = construct_composite_network()
+    df_composite = model_prep.normalize_features(df_composite, FEATURES)
+    df_composite_swc = df_composite.select([PROTEIN_U, PROTEIN_V, *SWC_FEATS])
 
     print("Writing unweighted network")
     df_unweighted = (
@@ -101,35 +121,33 @@ if __name__ == "__main__":
     print(f"Cross-validation iterations: {n_iters}")
     print()
 
-    features = FEATURES[:]
-    model_prep = ModelPreprocessor()
-    df_composite = model_prep.normalize_features(df_composite, features)
+    # Supervised co-complex probability weighting
+    rf_params = {
+        "n_estimators": 2000,
+        "criterion": "entropy",
+        "max_features": "sqrt",
+        "n_jobs": -1,
+    }  # from grid searching
 
-    # Weighting Models
-    cnb = SupervisedWeighting(CategoricalNB(), "CNB")
-    rf = SupervisedWeighting(RandomForestClassifier(), "RF")
-    mlp = SupervisedWeighting(MLPClassifier(max_iter=3000), "MLP")
-    rf_mlp = SupervisedWeighting(
-        VotingClassifier(
-            estimators=[
-                ("rf", RandomForestClassifier()),
-                ("mlp", MLPClassifier(max_iter=3000)),
-            ],
-            voting="soft",
-        ),
-        "RF_MLP",
+    rfw_swc = SupervisedWeighting(RandomForestClassifier(**rf_params), "RFW_SWC")
+    rfw = SupervisedWeighting(RandomForestClassifier(**rf_params), "RFW")
+
+    df_comp_pairs = get_cyc_comp_pairs()
+    y_true = (
+        model_prep.label_composite(
+            df_composite, df_comp_pairs, IS_CO_COMP, -1, "all", False
+        )
+        .select(IS_CO_COMP)
+        .to_numpy()
+        .ravel()
     )
 
-    evaluator = Evaluator()
+    sv_methods = ["SWC", "RFW_SWC", "RFW"]
 
-    df_evals = pl.DataFrame(
-        schema={
-            MODEL: pl.Utf8,
-            SCENARIO: pl.Utf8,
-            MAE: pl.Float64,
-            MSE: pl.Float64,
-        }
-    )
+    precision_evals = {method: [] for method in sv_methods}
+    recall_evals = {method: [] for method in sv_methods}
+
+    evals = []
 
     for xval_iter in range(n_iters):
         print(f"------------------- BEGIN: ITER {xval_iter} ---------------------")
@@ -138,17 +156,18 @@ if __name__ == "__main__":
             df_composite, df_train_pairs, IS_CO_COMP, xval_iter, "subset", False
         )
 
-        # Discretize the network using MDLP
-        df_composite_binned = model_prep.discretize_composite(
-            df_composite, df_train_labeled, features, IS_CO_COMP, xval_iter
+        # SWC cross-validation scores
+        df_w_swc = (
+            pl.read_csv(
+                f"../data/swc/raw_weighted/swc scored_edges iter{xval_iter}.txt",
+                new_columns=[PROTEIN_U, PROTEIN_V, WEIGHT],
+                separator=" ",
+                has_header=False,
+            )
+            .join(df_composite, on=[PROTEIN_U, PROTEIN_V])
+            .select([PROTEIN_U, PROTEIN_V, WEIGHT])
         )
 
-        # SWC cross-validation scores
-        df_w_swc = pl.read_csv(
-            f"../data/swc/raw_weighted/swc scored_edges iter{xval_iter}.txt",
-            new_columns=[PROTEIN_U, PROTEIN_V, WEIGHT],
-            separator=" ",
-        )
         # Rewrite SWC scores to another file as a form of preprocessing before MCL clustering
         df_w_swc.write_csv(
             f"../data/weighted/all_edges/cross_val/swc_iter{xval_iter}.csv",
@@ -168,87 +187,43 @@ if __name__ == "__main__":
         )
 
         # Run the classifiers
-        df_w_cnb = cnb.main(df_composite_binned, df_train_labeled, xval_iter)
-        df_w_rf = rf.main(df_composite, df_train_labeled, xval_iter)
-        df_w_mlp = mlp.main(df_composite, df_train_labeled, xval_iter)
-        df_w_rf_mlp = rf_mlp.main(df_composite, df_train_labeled, xval_iter)
+        df_w_rfw_swc = rfw_swc.main(df_composite_swc, df_train_labeled, xval_iter)
+        df_w_rfw = rfw.main(df_composite, df_train_labeled, xval_iter)
 
-        # Preparing labeled data for performance evaluations
-        df_test_labeled = model_prep.label_composite(
-            df_composite, df_test_pairs, IS_CO_COMP, xval_iter, "all", False
-        )
-        df_all_pairs = pl.concat([df_train_pairs, df_test_pairs])
-        df_all_labeled = model_prep.label_composite(
-            df_composite, df_all_pairs, IS_CO_COMP, xval_iter, "all", False
-        )
+        w_networks = {"SWC": df_w_swc, "RFW_SWC": df_w_rfw_swc, "RFW": df_w_rfw}
 
-        # Evaluate the classifiers
-        df_cnb_eval = evaluator.evaluate_co_comp_classifier(
-            cnb.name, df_w_cnb, df_test_labeled, df_all_labeled, IS_CO_COMP
-        )
-        df_rf_eval = evaluator.evaluate_co_comp_classifier(
-            rf.name, df_w_rf, df_test_labeled, df_all_labeled, IS_CO_COMP
-        )
-        df_mlp_eval = evaluator.evaluate_co_comp_classifier(
-            mlp.name, df_w_mlp, df_test_labeled, df_all_labeled, IS_CO_COMP
-        )
-        df_rf_mlp_eval = evaluator.evaluate_co_comp_classifier(
-            rf_mlp.name,
-            df_w_rf_mlp,
-            df_test_labeled,
-            df_all_labeled,
-            IS_CO_COMP,
-        )
+        for method in sv_methods:
+            y_pred = w_networks[method].select(WEIGHT).to_numpy().ravel()
 
-        # Evaluate SWC as well
-        df_swc_eval = evaluator.evaluate_co_comp_classifier(
-            "SWC", df_w_swc, df_test_labeled, df_all_labeled, IS_CO_COMP
-        )
-
-        print()
-        print(f"Evaluation summary of the models on xval_iter={xval_iter}")
-
-        df_iter_evals = (
-            pl.concat(
-                [
-                    df_cnb_eval,
-                    df_rf_eval,
-                    df_mlp_eval,
-                    df_swc_eval,
-                    df_rf_mlp_eval,
-                ]
+            precision, recall, thresholds = precision_recall_curve(
+                y_true, y_pred, pos_label=1
             )
-            .melt(
-                id_vars=[MODEL, SCENARIO],
-                variable_name="ERROR_KIND",
-                value_name="ERROR_VAL",
-            )
-            .pivot(
-                values="ERROR_VAL",
-                index=[MODEL, "ERROR_KIND"],
-                columns=SCENARIO,
-                aggregate_function="first",
-                maintain_order=True,
-            )
-        )
-        print(df_iter_evals)
-        df_evals = pl.concat(
-            [df_evals, df_cnb_eval, df_rf_eval, df_mlp_eval, df_rf_mlp_eval]
-        )
+            pr_auc = auc(recall, precision)
+            ap = average_precision_score(y_true, y_pred, pos_label=1)
+            rmse = mean_squared_error(y_true, y_pred, squared=False)
 
+            precision_evals[method].append(precision)
+            recall_evals[method].append(recall)
+
+            print()
+            print(f"Evaluations of {method}")
+            print(f"Precision-Recall AUC: {pr_auc}")
+            print(f"Average precision: {pr_auc}")
+            print(f"RMSE: {rmse}")
+
+            evals.append(
+                {METHOD: method, XVAL_ITER: xval_iter, AUC: pr_auc, AP: ap, RMSE: rmse}
+            )
         print(f"------------------- END: ITER {xval_iter} ---------------------\n\n")
 
     print(f"All {n_iters} iterations done!")
 
-    sns.set_palette("deep")
-    df_pd_evals = df_evals.to_pandas()
+    # sns.set_palette("deep")
 
-    plt.figure()
-    mae_fig = sns.barplot(data=df_pd_evals, x=SCENARIO, y=MAE, hue=MODEL)
-    mae_fig.set_title("MAE of various co-complex classifiers.")
+    print()
+    print("Average of all evaluations on all the cross-val iterations")
+    df_evals = pl.DataFrame(evals).groupby(METHOD).mean()
+    print(df_evals)
 
-    plt.figure()
-    mse_fig = sns.barplot(data=df_pd_evals, x=SCENARIO, y=MSE, hue=MODEL)
-    mse_fig.set_title("MSE of various co-complex classifiers.")
-
-    plt.show()
+    
+    # plt.show()

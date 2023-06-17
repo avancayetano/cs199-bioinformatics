@@ -19,7 +19,7 @@ def assert_prots_sorted(df: pl.DataFrame):
 
 def assert_df_bounded(df: pl.DataFrame, cols: List[str]):
     """
-    Checks if a dataframe column is bounded below and above by 0 and 1, respectively.
+    Checks if a dataframe column is within the range [0, 1].
 
     Args:
         df (pl.DataFrame): _description_

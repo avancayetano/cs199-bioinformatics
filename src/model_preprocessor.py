@@ -143,7 +143,8 @@ class ModelPreprocessor:
         balanced: bool = True,
     ) -> pl.DataFrame:
         """
-        Labels the composite network.
+        Labels the composite network. The output dataframe has the following
+        columns: [PROTEIN_U, PROTEIN_V, LABEL]
 
         Args:
             df_composite (pl.DataFrame): _description_

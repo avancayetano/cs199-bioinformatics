@@ -68,7 +68,7 @@ SvWeighted = Dict[str, Dict[int, pl.DataFrame]]
 Edges = List[Union[Literal["20k_edges"], Literal["all_edges"]]]
 
 
-class ClusterEvaluator:
+class ClustersEvaluator:
     def __init__(
         self,
         inflations: List[int],
@@ -551,7 +551,7 @@ if __name__ == "__main__":
     n_dens = 5
     n_iters = 1
 
-    cluster_eval = ClusterEvaluator(
+    cluster_eval = ClustersEvaluator(
         inflations=inflations,
         edges=edges,
         feat_methods=feat_methods,

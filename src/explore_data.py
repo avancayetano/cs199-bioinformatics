@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 import polars as pl
 import seaborn as sns
 
-from aliases import FEATURES, IS_CO_COMP, IS_NIP, PROTEIN_U, PROTEIN_V, TOPO
+from aliases import FEATURES, IS_CO_COMP, IS_NIP, PROTEIN, PROTEIN_U, PROTEIN_V, TOPO
 from model_preprocessor import ModelPreprocessor
-from utils import construct_composite_network, get_cyc_comp_pairs
+from utils import construct_composite_network, get_cyc_comp_pairs, get_unique_proteins
 
 
 class ExploratoryDataAnalysis:
@@ -25,6 +25,21 @@ class ExploratoryDataAnalysis:
         self.features = features
         self.df_composite = construct_composite_network(features=self.features)
         self.model_prep = ModelPreprocessor()
+
+    def num_co_comp_pairs(self):
+        n_total_co_comp_pairs = 11_923
+        df_co_comp_pairs = get_cyc_comp_pairs()
+        n_unique_co_comp_pairs = df_co_comp_pairs.shape[0]
+        n_unique_proteins = get_unique_proteins(df_co_comp_pairs).shape[0]
+        print(f"n_total_co_comp_pairs = {n_total_co_comp_pairs}")
+        print(f"n_unique_co_comp_pairs = {n_unique_co_comp_pairs}")
+        print(f"n_unique_proteins = {n_unique_proteins}")
+        print(f"Total possible pairs: {n_unique_proteins ** 2}")
+        df_labeled = self.model_prep.label_composite(
+            self.df_composite, df_co_comp_pairs, IS_CO_COMP, 0, "subset", False
+        )
+        print(f"Possible pairs in the network: {df_labeled.shape[0]}")
+        print(f"Repeated pairs: {n_total_co_comp_pairs - n_unique_co_comp_pairs}")
 
     def features_heatmap(self):
         df_pd_composite = self.df_composite.to_pandas()
@@ -214,14 +229,16 @@ class ExploratoryDataAnalysis:
             self.df_composite, self.features
         )
         print(self.df_composite.select(self.features).describe())
-        self.features_heatmap()
-        self.features_dist_hist()
-        self.explore_co_complexes()
-        self.explore_nip_pairs()
 
-        self.nip_co_comp_intersection()
-        self.explore_co_comp_pairs()
-        plt.show()
+        self.num_co_comp_pairs()
+        # self.features_heatmap()
+        # self.features_dist_hist()
+        # self.explore_co_complexes()
+        # self.explore_nip_pairs()
+
+        # self.nip_co_comp_intersection()
+        # self.explore_co_comp_pairs()
+        # plt.show()
 
 
 if __name__ == "__main__":
