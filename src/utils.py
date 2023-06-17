@@ -165,6 +165,16 @@ def get_all_cyc_proteins() -> pl.Series:
 
 
 def get_cyc_comp_pairs(df_complex_ids: Optional[pl.DataFrame] = None):
+    """
+    If None, gets all co-complex pairs.
+
+    Args:
+        df_complex_ids (Optional[pl.DataFrame], optional): _description_. Defaults to None.
+
+    Returns:
+        _type_: _description_
+    """
+
     df_all_complexes = get_all_cyc_complexes()
     if df_complex_ids is None:
         complexes: List[List[str]] = (

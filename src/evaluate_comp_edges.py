@@ -1,38 +1,27 @@
 # pyright: basic
 
-import time
-from pprint import pprint
-from typing import List
+from typing import List, TypedDict
 
 import matplotlib.pyplot as plt
 import polars as pl
 import seaborn as sns
-from sklearn.ensemble import RandomForestClassifier, VotingClassifier
-from sklearn.metrics import average_precision_score, mean_squared_error
-from sklearn.naive_bayes import CategoricalNB
-from sklearn.neural_network import MLPClassifier
-from sklearn.pipeline import Pipeline
+from sklearn.metrics import auc, brier_score_loss, precision_recall_curve
 
 from aliases import (
-    CO_OCCUR,
+    BRIER_SCORE,
     FEATURES,
     IS_CO_COMP,
-    MAE,
-    MODEL,
-    MSE,
+    METHOD,
+    PR_AUC,
+    PRECISION,
     PROTEIN_U,
     PROTEIN_V,
-    SCENARIO,
-    STRING,
+    RECALL,
     SUPER_FEATS,
-    SWC_FEATS,
-    TOPO,
-    TOPO_L2,
     WEIGHT,
+    XVAL_ITER,
 )
-from assertions import assert_df_bounded, assert_no_zero_weight
 from model_preprocessor import ModelPreprocessor
-from supervised_weighting import SupervisedWeighting
 from utils import (
     construct_composite_network,
     get_cyc_comp_pairs,
@@ -40,127 +29,88 @@ from utils import (
 )
 
 
-class CoCompEdgesEvaluator:
-    """
-    Compare the performance of the following methods
-    in terms of predicting co-complex edges
-    1. SWC
-    2. SCCP_SWC
-    3. SCCP
-    """
+class CompEdgesEvaluator:
+    def __init__(self) -> None:
+        self.sv_methods = ["RFW", "SWC"]
+        self.feat_methods = FEATURES + [method["name"] for method in SUPER_FEATS]
+        self.methods = self.sv_methods + self.feat_methods
+        self.n_iters = 10
 
-    def __init__(self, n_iters: int):
-        self.n_iters = n_iters
-
-        self.model_prep = ModelPreprocessor()
+        model_prep = ModelPreprocessor()
         df_composite = construct_composite_network()
-
-        # normalized protein networks
-        self.df_composite = self.model_prep.normalize_features(df_composite, FEATURES)
-        self.df_composite_swc = self.model_prep.normalize_features(
-            df_composite, SWC_FEATS
-        )
-
         comp_pairs = get_cyc_comp_pairs()
-        # True labels
-        self.y_true = (
-            self.model_prep.label_composite(
-                df_composite=self.df_composite,
-                df_positive_pairs=comp_pairs,
-                label=IS_CO_COMP,
-                seed=0,
-                mode="all",
-                balanced=False,
-            )
-            .select(IS_CO_COMP)
-            .to_numpy()
-            .ravel()
+        self.df_labeled = model_prep.label_composite(
+            df_composite, comp_pairs, IS_CO_COMP, -1, "all", False
         )
+
+    def get_w_network_path(self, method: str, xval_iter: int) -> str:
+        if method in self.sv_methods:
+            path = f"../data/weighted/all_edges/cross_val/{method.lower()}_iter{xval_iter}.csv"
+        else:
+            path = f"../data/weighted/all_edges/features/{method.lower()}.csv"
+
+        return path
 
     def main(self):
-        sccp_swc = SupervisedWeighting(
-            RandomForestClassifier(
-                n_estimators=2000,
-                criterion="entropy",
-                max_features="sqrt",
-                n_jobs=-1,
-                random_state=6789,
-            ),
-            "SCCP_SWC",
-        )
-
-        sccp = SupervisedWeighting(
-            RandomForestClassifier(
-                n_estimators=2000,
-                criterion="entropy",
-                max_features="sqrt",
-                n_jobs=-1,
-                random_state=6789,
-            ),
-            "SCCP",
-        )
-
+        evals = []
+        print(f"Evaluating on these ({len(self.methods)}) methods: {self.methods}")
+        print()
         for xval_iter in range(self.n_iters):
-            print()
-            print(f"------------------- BEGIN: ITER {xval_iter} ---------------------")
+            print(f"Evaluating cross-val iteration: {xval_iter}")
             df_train_pairs, df_test_pairs = get_cyc_train_test_comp_pairs(xval_iter)
-            df_train_labeled = self.model_prep.label_composite(
-                self.df_composite,
-                df_train_pairs,
-                IS_CO_COMP,
-                xval_iter,
-                "subset",
-                False,
+            df_composite_test = self.df_labeled.join(
+                df_train_pairs, on=[PROTEIN_U, PROTEIN_V], how="anti"
             )
+            for method in self.methods:
+                path = self.get_w_network_path(method, xval_iter)
 
-            df_w_swc = pl.read_csv(
-                f"../data/swc/raw_weighted/swc scored_edges iter{xval_iter}.txt",
-                new_columns=[PROTEIN_U, PROTEIN_V, WEIGHT],
-                separator=" ",
-            )
-            df_w_sccp_swc = sccp_swc.main(
-                self.df_composite_swc, df_train_labeled, xval_iter
-            )
-            df_w_sccp = sccp.main(self.df_composite, df_train_labeled, xval_iter)
-            w_networks = [df_w_swc, df_w_sccp_swc, df_w_sccp]
-
-            for model in models:
-                weighted.append(
-                    model.main(self.df_composite, df_train_labeled, xval_iter)
+                df_w = pl.read_csv(
+                    path,
+                    has_header=False,
+                    separator="\t",
+                    new_columns=[PROTEIN_U, PROTEIN_V, WEIGHT],
                 )
 
-            print("Performance evaluations...")
-            print()
-            for idx, w in enumerate(weighted):
-                y_pred = w.select(WEIGHT).to_numpy().ravel()
-                rmse = mean_squared_error(self.y_true, y_pred) ** (0.5)
-                ap = average_precision_score(self.y_true, y_pred)
-                ap_list[models[idx].name].append(ap)
-                rmse_list[models[idx].name].append(rmse)
-                print(f"[{models[idx].name}] RMSE: {rmse}")
-                print(f"[{models[idx].name}] AP: {ap}")
+                df_pred = df_composite_test.join(
+                    df_w, on=[PROTEIN_U, PROTEIN_V], how="inner"
+                )
 
-            print(f"---------------- END: ITER {xval_iter} ---------------")
+                y_true = df_pred.select(IS_CO_COMP).to_numpy().ravel()
+                y_pred = df_pred.select(WEIGHT).to_numpy().ravel()
+
+                brier_score = brier_score_loss(y_true, y_pred, pos_label=1)
+
+                precision, recall, thresholds = precision_recall_curve(
+                    y_true, y_pred, pos_label=1
+                )
+                pr_auc = auc(recall, precision)
+
+                evals.append(
+                    {
+                        METHOD: method,
+                        XVAL_ITER: xval_iter,
+                        BRIER_SCORE: brier_score,
+                        PR_AUC: pr_auc,
+                    }
+                )
+
             print()
 
+        df_evals = (
+            pl.DataFrame(evals)
+            .groupby(METHOD)
+            .mean()
+            .select(pl.exclude(XVAL_ITER))
+            .sort([BRIER_SCORE, PR_AUC], descending=[False, True])
+        )
         print()
-        print()
-        print("Final evaluations")
-        avg_ap = {
-            model.name: sum(ap_list[model.name]) / self.n_iters for model in models
-        }
-        avg_rmse = {
-            model.name: sum(rmse_list[model.name]) / self.n_iters for model in models
-        }
-        print(f"AP: {avg_ap}")
-        print(f"RMSE: {avg_rmse}")
+        print("Average of all evaluations on all the cross-val iterations")
+        print(df_evals)
 
 
 if __name__ == "__main__":
-    start = time.time()
-    n_iters = 10
+    pl.Config.set_tbl_cols(20)
+    pl.Config.set_tbl_rows(20)
 
-    evaluator = CoCompEdgesEvaluator(n_iters)
+    evaluator = CompEdgesEvaluator()
     evaluator.main()
-    print("===================================")
-    print(f"Execution time: {time.time() - start}")

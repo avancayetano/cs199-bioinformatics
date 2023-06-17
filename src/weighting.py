@@ -1,40 +1,21 @@
-# pyright: basic
-
 """
-A script that weights the composite network.
+A script that weights the composite network using RFW and the features.
 """
 
+import time
+from typing import List
 
-from typing import List, TypedDict
-
-import matplotlib.pyplot as plt
 import polars as pl
-import seaborn as sns
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import (
-    auc,
-    average_precision_score,
-    mean_squared_error,
-    precision_recall_curve,
-)
 
 from aliases import (
-    CO_OCCUR,
     FEATURES,
     IS_CO_COMP,
-    MAE,
-    MODEL,
-    MSE,
     PROTEIN_U,
     PROTEIN_V,
-    SCENARIO,
-    STRING,
     SUPER_FEATS,
-    SWC_FEATS,
     TOPO,
-    TOPO_L2,
     WEIGHT,
-    XVAL_ITER,
 )
 from assertions import assert_df_bounded, assert_no_zero_weight
 from model_preprocessor import ModelPreprocessor
@@ -44,11 +25,6 @@ from utils import (
     get_cyc_comp_pairs,
     get_cyc_train_test_comp_pairs,
 )
-
-METHOD = "METHOD"
-AP = "AP"
-AUC = "AUC"
-RMSE = "RMSE"
 
 
 class FeatureWeighting:
@@ -83,11 +59,13 @@ class FeatureWeighting:
 if __name__ == "__main__":
     pl.Config.set_tbl_rows(15)
 
+    start = time.time()
+
     model_prep = ModelPreprocessor()
     df_composite = construct_composite_network()
     df_composite = model_prep.normalize_features(df_composite, FEATURES)
-    df_composite_swc = df_composite.select([PROTEIN_U, PROTEIN_V, *SWC_FEATS])
 
+    print("---------------------------------------------------------")
     print("Writing unweighted network")
     df_unweighted = (
         df_composite.filter(pl.col(TOPO) > 0)
@@ -122,32 +100,17 @@ if __name__ == "__main__":
     print()
 
     # Supervised co-complex probability weighting
-    rf_params = {
-        "n_estimators": 2000,
-        "criterion": "entropy",
-        "max_features": "sqrt",
-        "n_jobs": -1,
-    }  # from grid searching
-
-    rfw_swc = SupervisedWeighting(RandomForestClassifier(**rf_params), "RFW_SWC")
-    rfw = SupervisedWeighting(RandomForestClassifier(**rf_params), "RFW")
-
-    df_comp_pairs = get_cyc_comp_pairs()
-    y_true = (
-        model_prep.label_composite(
-            df_composite, df_comp_pairs, IS_CO_COMP, -1, "all", False
-        )
-        .select(IS_CO_COMP)
-        .to_numpy()
-        .ravel()
+    rfw = SupervisedWeighting(
+        RandomForestClassifier(
+            n_estimators=3000,
+            criterion="entropy",
+            max_features="sqrt",
+            n_jobs=-1,
+        ),
+        "RFW",
     )
 
-    sv_methods = ["SWC", "RFW_SWC", "RFW"]
-
-    precision_evals = {method: [] for method in sv_methods}
-    recall_evals = {method: [] for method in sv_methods}
-
-    evals = []
+    df_comp_pairs = get_cyc_comp_pairs()
 
     for xval_iter in range(n_iters):
         print(f"------------------- BEGIN: ITER {xval_iter} ---------------------")
@@ -168,7 +131,8 @@ if __name__ == "__main__":
             .select([PROTEIN_U, PROTEIN_V, WEIGHT])
         )
 
-        # Rewrite SWC scores to another file as a form of preprocessing before MCL clustering
+        # Rewrite SWC scores to another file as a form of preprocessing as
+        # it needs to be formatted before doing MCL
         df_w_swc.write_csv(
             f"../data/weighted/all_edges/cross_val/swc_iter{xval_iter}.csv",
             has_header=False,
@@ -176,54 +140,17 @@ if __name__ == "__main__":
         )
 
         # Write top 20k edges of SWC
-        df_w_swc_20k = (
-            df_w_swc.sort(pl.col(WEIGHT), descending=True)
-            .head(20_000)
-            .write_csv(
-                f"../data/weighted/20k_edges/cross_val/swc_20k_iter{xval_iter}.csv",
-                has_header=False,
-                separator="\t",
-            )
+        df_w_swc.sort(pl.col(WEIGHT), descending=True).head(20_000).write_csv(
+            f"../data/weighted/20k_edges/cross_val/swc_20k_iter{xval_iter}.csv",
+            has_header=False,
+            separator="\t",
         )
 
-        # Run the classifiers
-        df_w_rfw_swc = rfw_swc.main(df_composite_swc, df_train_labeled, xval_iter)
+        # Weight the network using RFW
         df_w_rfw = rfw.main(df_composite, df_train_labeled, xval_iter)
 
-        w_networks = {"SWC": df_w_swc, "RFW_SWC": df_w_rfw_swc, "RFW": df_w_rfw}
-
-        for method in sv_methods:
-            y_pred = w_networks[method].select(WEIGHT).to_numpy().ravel()
-
-            precision, recall, thresholds = precision_recall_curve(
-                y_true, y_pred, pos_label=1
-            )
-            pr_auc = auc(recall, precision)
-            ap = average_precision_score(y_true, y_pred, pos_label=1)
-            rmse = mean_squared_error(y_true, y_pred, squared=False)
-
-            precision_evals[method].append(precision)
-            recall_evals[method].append(recall)
-
-            print()
-            print(f"Evaluations of {method}")
-            print(f"Precision-Recall AUC: {pr_auc}")
-            print(f"Average precision: {pr_auc}")
-            print(f"RMSE: {rmse}")
-
-            evals.append(
-                {METHOD: method, XVAL_ITER: xval_iter, AUC: pr_auc, AP: ap, RMSE: rmse}
-            )
         print(f"------------------- END: ITER {xval_iter} ---------------------\n\n")
 
-    print(f"All {n_iters} iterations done!")
-
-    # sns.set_palette("deep")
-
     print()
-    print("Average of all evaluations on all the cross-val iterations")
-    df_evals = pl.DataFrame(evals).groupby(METHOD).mean()
-    print(df_evals)
-
-    
-    # plt.show()
+    print(f"All {n_iters} iterations done!")
+    print(f"Execution time: {time.time() - start}")

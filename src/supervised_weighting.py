@@ -94,8 +94,8 @@ class SupervisedWeighting:
         print("Training done!")
 
         # After learning the parameters, weight all protein pairs
-        X_test = df_composite.select(selected_features).to_numpy()
-        ndarr_pred = self.model.predict_proba(X_test)
+        X = df_composite.select(selected_features).to_numpy()
+        ndarr_pred = self.model.predict_proba(X)
 
         CLASS_PROBA = [PROBA_NON_CO_COMP, PROBA_CO_COMP]
 
@@ -105,10 +105,6 @@ class SupervisedWeighting:
 
         df_w_composite = pl.concat([df_composite, df_weights], how="horizontal").select(
             [PROTEIN_U, PROTEIN_V, PROBA_NON_CO_COMP, PROBA_CO_COMP]
-        )
-
-        df_w_composite.write_csv(
-            f"../data/training/{self.name.lower()}_probas_iter{xval_iter}.csv"
         )
 
         print("Weighting done!")
