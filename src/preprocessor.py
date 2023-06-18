@@ -134,6 +134,7 @@ class Preprocessor:
                 .rename({"To": PROTEIN_U, "To_right": PROTEIN_V})
                 .with_columns(sort_prot_cols(PROTEIN_U, PROTEIN_V))
                 .select([PROTEIN_U, PROTEIN_V])
+                .filter((pl.col(PROTEIN_U) != pl.col(PROTEIN_V)))
                 .unique(maintain_order=True)
                 .collect()
             )
