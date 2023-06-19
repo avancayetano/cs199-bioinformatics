@@ -61,6 +61,10 @@ class FeatureWeighting:
         return df_w_composite
 
 
+class Weighting:
+    pass
+
+
 if __name__ == "__main__":
     pl.Config.set_tbl_rows(15)
 
@@ -124,17 +128,7 @@ if __name__ == "__main__":
         "learning_rate": 0.01,
     }
     xgw = SupervisedWeighting(XGBClassifier(**xgw_params), "XGW")
-    # gbw = SupervisedWeighting(
-    #     HistGradientBoostingClassifier(
-    #         max_iter=3000, l2_regularization=0.5, learning_rate=0.05
-    #     ),
-    #     "GBW",
-    # )
-    # xgrfw_params = {
-    #     "n_estimators": 3000,
-    # }
 
-    # xgrfw = SupervisedWeighting(XGBRFClassifier(**xgrfw_params), "XGRFW")
     df_comp_pairs = get_cyc_comp_pairs()
 
     for xval_iter in range(n_iters):

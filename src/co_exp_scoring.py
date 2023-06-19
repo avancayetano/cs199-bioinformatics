@@ -4,6 +4,7 @@ from typing import List
 import polars as pl
 
 from aliases import CO_EXP, PROTEIN, PROTEIN_U, PROTEIN_V
+from assertions import assert_gene_exp_arranged, assert_same_edges
 
 GE_MEAN = "GE_MEAN"
 GE_SD = "GE_SD"
@@ -155,12 +156,7 @@ class CoExpScoring:
     ) -> pl.DataFrame:
         df_edges_gene_exp = (
             df_filtered.lazy()
-            .join(
-                df_gene_exp.lazy(),
-                left_on=PROTEIN_U,
-                right_on=PROTEIN,
-                how="left",
-            )
+            .join(df_gene_exp.lazy(), left_on=PROTEIN_U, right_on=PROTEIN, how="left")
             .rename({t: f"{t}_{PROTEIN_U}" for t in time_points})
             .join(df_gene_exp.lazy(), left_on=PROTEIN_V, right_on=PROTEIN, how="left")
             .rename({t: f"{t}_{PROTEIN_V}" for t in time_points})
@@ -186,6 +182,8 @@ class CoExpScoring:
             ],
             how="horizontal",
         )
+        assert_same_edges(df_filtered, df_melted)
+        assert_gene_exp_arranged(df_melted)
 
         return df_melted
 

@@ -42,7 +42,7 @@ class TopoScoring:
             .filter(pl.col(PROTEIN_U) != pl.col(PROTEIN_V))
             .unique(maintain_order=True)
             .join(df_ppin.lazy(), on=[PROTEIN_U, PROTEIN_V], how="anti")
-            .collect()
+            .collect(streaming=True)
         )
 
         assert_prots_sorted(df_l2_ppin)
@@ -91,7 +91,7 @@ class TopoScoring:
             .agg(pl.concat_list([pl.col(PROTEIN_V), pl.col(TOPO)]))
             .rename({PROTEIN_U: PROTEIN, PROTEIN_V: NEIGHBORS})
             .with_columns(self.get_prot_weighted_deg())
-            .collect()
+            .collect(streaming=True)
         )
 
         return df_neighbors
@@ -125,7 +125,7 @@ class TopoScoring:
 
         df = (
             df_w_ppin.lazy()
-            .select(pl.col(PROTEIN_X))
+            .select([PROTEIN_U, PROTEIN_V])
             .join(
                 df_neighbors.lazy(),
                 left_on=PROTEIN_X,
@@ -138,7 +138,7 @@ class TopoScoring:
                     W_DEG: f"{W_DEG}_{PROTEIN_X}",
                 }
             )
-            .collect()
+            .collect(streaming=True)
         )
 
         return df
@@ -194,18 +194,20 @@ class TopoScoring:
         avg_prot_w_deg: float,
         SCORE: str,
     ):
-        df_joined = pl.concat(
-            [
-                self.join_prot_neighbors(df_w_ppin_batch, df_neighbors, PROTEIN_U),
-                self.join_prot_neighbors(df_w_ppin_batch, df_neighbors, PROTEIN_V),
-                df_w_ppin_batch.select(pl.col(SCORE)),
-            ],
-            how="horizontal",
+        lf_joined = (
+            self.join_prot_neighbors(df_w_ppin_batch, df_neighbors, PROTEIN_U)
+            .lazy()
+            .join(
+                self.join_prot_neighbors(
+                    df_w_ppin_batch, df_neighbors, PROTEIN_V
+                ).lazy(),
+                on=[PROTEIN_U, PROTEIN_V],
+            )
+            .join(df_w_ppin_batch.lazy(), on=[PROTEIN_U, PROTEIN_V])
         )
 
         df_w_ppin_batch = (
-            df_joined.lazy()
-            .with_columns(
+            lf_joined.with_columns(
                 [self.numerator_expr(), self.denominator_expr(avg_prot_w_deg)]
             )
             .drop(
@@ -219,7 +221,7 @@ class TopoScoring:
             .with_columns((pl.col(NUMERATOR) / pl.col(DENOMINATOR)).alias(SCORE))
             .drop([NUMERATOR, DENOMINATOR])
             .select([PROTEIN_U, PROTEIN_V, SCORE])
-            .collect()
+            .collect(streaming=True)
         )
 
         return df_w_ppin_batch
@@ -350,6 +352,7 @@ if __name__ == "__main__":
         df_w_ppin.join(df_swc, on=[PROTEIN_U, PROTEIN_V], how="outer")
         .fill_null(0.0)
         .filter(pl.sum(SWC_FEATS) > 0)
+        .sort([PROTEIN_U, PROTEIN_V])
     )
 
     print(f">>> PREPROCESSED DIP COMPOSITE NETWORK")

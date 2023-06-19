@@ -103,7 +103,6 @@ class SupervisedWeighting:
         self.model.fit(X_train, y_train)  # training the model
 
         print("Training done!")
-        print(self.model.feature_importances_)
 
         # After learning the parameters, weight all protein pairs
         X = df_composite.select(selected_features).to_numpy()

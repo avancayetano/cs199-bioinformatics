@@ -35,6 +35,9 @@ class ModelPreprocessor:
             ],
             how="horizontal",
         )
+        print("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
+        print(features)
+        print(scaler.get_feature_names_out())
 
         return df_composite
 

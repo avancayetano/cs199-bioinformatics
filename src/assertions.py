@@ -42,3 +42,18 @@ def assert_no_null(df: pl.DataFrame, cols: Union[List[str], Literal["*"]] = "*")
 
 def assert_no_zero_weight(df: pl.DataFrame):
     assert df.filter(pl.col(WEIGHT) == 0).shape[0] == 0
+
+
+def assert_same_edges(df1: pl.DataFrame, df2: pl.DataFrame):
+    df1 = df1.select([PROTEIN_U, PROTEIN_V]).unique()
+    df2 = df2.select([PROTEIN_U, PROTEIN_V]).unique()
+    df = df1.join(df2, on=[PROTEIN_U, PROTEIN_V], how="inner")
+    assert df.shape[0] == df1.shape[0] == df2.shape[0]
+
+
+def assert_gene_exp_arranged(df_melted: pl.DataFrame):
+    df = df_melted.filter(
+        pl.col("T_PROTEIN_U").str.extract(r"T(\d+).+")
+        != pl.col("T_PROTEIN_V").str.extract(r"T(\d+).+")
+    )
+    assert df.shape[0] == 0
