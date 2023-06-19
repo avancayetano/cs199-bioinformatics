@@ -3,7 +3,7 @@ from typing import List
 
 import polars as pl
 
-from aliases import PROTEIN, PROTEIN_U, PROTEIN_V, TOPO, TOPO_L2
+from aliases import PROTEIN, PROTEIN_U, PROTEIN_V, SWC_FEATS, TOPO, TOPO_L2
 from assertions import assert_prots_sorted
 from utils import get_unique_proteins, sort_prot_cols
 
@@ -31,7 +31,7 @@ class TopoScoring:
             pl.col(NEIGHBORS).list.eval(pl.element().list.get(1).cast(float)).list.sum()
         ).alias(W_DEG)
 
-    def get_neighbors(self, df_w_ppin: pl.DataFrame, SCORE: str = TOPO) -> pl.DataFrame:
+    def get_neighbors(self, df_w_ppin: pl.DataFrame) -> pl.DataFrame:
         """
         Returns a DF where
         - first column is a unique protein;
@@ -53,25 +53,21 @@ class TopoScoring:
                     [
                         pl.col(PROTEIN_V).alias(PROTEIN_U),
                         pl.col(PROTEIN_U).alias(PROTEIN_V),
-                        pl.col(SCORE),
+                        pl.col(TOPO),
                     ],
                 )
             )
             .lazy()
             .groupby(pl.col(PROTEIN_U), maintain_order=True)
-            .agg(pl.concat_list([pl.col(PROTEIN_V), pl.col(SCORE)]))
+            .agg(pl.concat_list([pl.col(PROTEIN_V), pl.col(TOPO)]))
             .rename({PROTEIN_U: PROTEIN, PROTEIN_V: NEIGHBORS})
             .with_columns(self.get_prot_weighted_deg())
             .collect()
         )
 
-        assert df_neighbors.select(PROTEIN).is_unique().all()
-
         return df_neighbors
 
-    def get_avg_prot_w_deg(
-        self, df_neighbors: pl.DataFrame, SCORE: str = TOPO
-    ) -> float:
+    def get_avg_prot_w_deg(self, df_neighbors: pl.DataFrame) -> float:
         """
         Gets the average weighted degree of all the proteins.
         """
@@ -178,6 +174,13 @@ class TopoScoring:
             how="horizontal",
         )
 
+        print(
+            df_joined.filter(
+                (pl.col(PROTEIN_U) == "YCR094W") & (pl.col(PROTEIN_V) == "YEL070W")
+            )
+        )
+        # YCR094W,YJR091C
+        # YCR094W   ┆ YEL070W
         df_w_ppin_batch = (
             df_joined.lazy()
             .with_columns(
@@ -259,26 +262,30 @@ class TopoScoring:
         assert_prots_sorted(df_l2_ppin)
         return df_l2_ppin
 
-    def weight(
-        self, k: int, df_w_ppin: pl.DataFrame, SCORE: str = TOPO, n_batches: int = 1
-    ):
+    def weight(self, k: int, df_l1_ppin: pl.DataFrame, df_l2_ppin: pl.DataFrame):
+        df_w_ppin = pl.DataFrame()
         for i in range(k):
-            df_neighbors = self.get_neighbors(df_w_ppin, SCORE)
+            df_neighbors = self.get_neighbors(df_l1_ppin)
             print()
+
             print(f"-------------- ADJUSTCD ITERATION = {i} --------------------")
             print(">>> DF NEIGHBORS")
             print(df_neighbors)
 
-            avg_prot_w_deg = self.get_avg_prot_w_deg(df_neighbors, SCORE)
+            avg_prot_w_deg = self.get_avg_prot_w_deg(df_neighbors)
             print(">>> AVG PROT W_DEG")
             print(avg_prot_w_deg)
 
-            df_w_ppin = self.score(
-                df_w_ppin, df_neighbors, avg_prot_w_deg, SCORE, n_batches
-            )
+            df_l1_ppin = self.score(df_l1_ppin, df_neighbors, avg_prot_w_deg, TOPO)
+            df_l2_ppin = self.score(df_l2_ppin, df_neighbors, avg_prot_w_deg, TOPO_L2)
+
             print(f">>> DF_W_PPIN | k = {k}")
+            df_w_ppin = df_l1_ppin.join(
+                df_l2_ppin, on=[PROTEIN_U, PROTEIN_V], how="outer"
+            ).fill_null(0.0)
             print(df_w_ppin)
             print()
+        df_w_ppin = df_w_ppin.filter((pl.col(TOPO_L2) > 0.1))
         return df_w_ppin
 
     def main(self, df_ppin: pl.DataFrame, k: int = 2) -> pl.DataFrame:
@@ -297,26 +304,24 @@ class TopoScoring:
 
         # Weighted PPIN at k=0
         df_l1_ppin = df_ppin.with_columns(pl.lit(1.0).alias(TOPO))
-        df_l1_ppin = self.weight(2, df_l1_ppin, TOPO)
-
-        print()
-        print("Constructing level-2 network")
         df_l2_ppin = self.construct_l2_network(df_ppin).with_columns(
             pl.lit(1.0).alias(TOPO_L2)
         )
+        df_w_ppin = self.weight(2, df_l1_ppin, df_l2_ppin)
 
-        print(df_l2_ppin)
+        # print("ppppppppppppppppppppppppp")
+        # print(df_l2_ppin.filter(pl.col(PROTEIN_U) == "YEL070W"))
 
-        df_l2_ppin = self.weight(2, df_l2_ppin, TOPO_L2, 10).filter(
-            pl.col(TOPO_L2) > 0.1
-        )
+        # df_l2_ppin = self.weight(2, df_l2_ppin, TOPO_L2, 10).filter(
+        #     pl.col(TOPO_L2) > 0.1
+        # )
 
-        print(df_l2_ppin)
+        # print(df_l2_ppin)
 
-        print("------------------------")
-        df_w_ppin = df_l1_ppin.join(
-            df_l2_ppin, on=[PROTEIN_U, PROTEIN_V], how="outer"
-        ).fill_null(0.0)
+        # print("------------------------")
+        # df_w_ppin = df_l1_ppin.join(
+        #     df_l2_ppin, on=[PROTEIN_U, PROTEIN_V], how="outer"
+        # ).fill_null(0.0)
 
         print("-------------------- END: TOPO SCORING -------------------")
 
@@ -349,6 +354,19 @@ if __name__ == "__main__":
     print(df_w_ppin)
 
     df_w_ppin.write_csv("../data/scores/dip_topo.csv", has_header=True)
+
+    # df_w_ppin = pl.read_csv("../data/scores/dip_topo.csv")
+    # df_swc = pl.read_csv("../data/scores/swc_composite_scores.csv").drop(
+    #     [TOPO, TOPO_L2]
+    # )
+
+    # df_dip = (
+    #     df_w_ppin.join(df_swc, on=[PROTEIN_U, PROTEIN_V], how="outer")
+    #     .fill_null(0.0)
+    #     .filter(pl.sum(SWC_FEATS) > 0)
+    # )
+
+    # print(df_dip)
 
     print(f">>> [{TOPO}] Execution Time")
     print(time.time() - start_time)
