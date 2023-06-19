@@ -1,6 +1,6 @@
 # TCSS Modified Version\*
 
-_\*Last modified by Anthony Van Cayetano on 2023-06-11._
+_\*Last modified by Anthony Van Cayetano on 2023-06-19._
 
 This `TCSS` library is a modified version of Topological Clustering Semantic Similarity (TCSS) algorithm, originally written by Shobhit Jain and Gary D Bader (2010).
 
@@ -33,3 +33,6 @@ The researcher ran the following command:
 `python TCSS/tcss.py -i data/preprocessed/swc_edges.csv -o data/scores/go_ss_scores.csv --drop="IEA" --gene=data/databases/sgd.gaf --go=data/databases/gene_ontology.obo`
 
 to generate the GO-weighted network (`data/scores/go_ss_scores.csv`) used in the study.
+
+For the DIP composite network, the following command was used:
+`python TCSS/tcss.py -i data/preprocessed/dip_edges.csv -o data/scores/dip_go_ss_scores.csv --drop="IEA" --gene=data/databases/sgd.gaf --go=data/databases/gene_ontology.obo`

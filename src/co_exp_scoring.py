@@ -297,5 +297,23 @@ if __name__ == "__main__":
 
     df_w_edges.write_csv("../data/scores/co_exp_scores.csv", has_header=True)
 
+    # --------------------------------------------------------------------------
+    # for the DIP composite network
+    df_dip_edges = pl.read_csv(
+        "../data/preprocessed/dip_edges.csv",
+        has_header=False,
+        new_columns=[PROTEIN_U, PROTEIN_V],
+    )
+
+    co_exp_scoring = CoExpScoring()
+    df_dip_w_edges = co_exp_scoring.main(df_dip_edges)
+
+    print(f">>> [{SCORE}] DIP Scored Edges")
+    print(df_dip_w_edges)
+
+    print(df_dip_w_edges.describe())
+
+    df_dip_w_edges.write_csv("../data/scores/dip_co_exp_scores.csv", has_header=True)
+
     print(f">>> [{SCORE}] Execution Time")
     print(time.time() - start_time)
