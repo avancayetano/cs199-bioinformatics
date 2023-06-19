@@ -12,12 +12,41 @@ W_DEG = "W_DEG"
 NUMERATOR = "NUMERATOR"
 DENOMINATOR = "DENOMINATOR"
 
+"""
+This is a script that enriches the DIP PPIN into a omposite network by 
+topological scoring and integrating CO_OCCUR and STRING.
+"""
+
 
 class TopoScoring:
     """
     Topological scoring of PPIs for the DIP PPIN.
     An Implementation of iterative AdjustCD [Liu et al., 2009].
     """
+
+    def __init__(self, n_batches: int = 1) -> None:
+        self.n_batches = n_batches
+
+    def construct_l2_network(self, df_ppin: pl.DataFrame) -> pl.DataFrame:
+        df_ppin_rev = df_ppin.select(
+            [pl.col(PROTEIN_U).alias(PROTEIN_V), pl.col(PROTEIN_V).alias(PROTEIN_U)]
+        ).select([PROTEIN_U, PROTEIN_V])
+
+        df_ppin = pl.concat([df_ppin, df_ppin_rev], how="vertical")
+        lf_ppin = df_ppin.lazy()
+        df_l2_ppin = (
+            lf_ppin.join(lf_ppin, on=PROTEIN_V, how="inner")
+            .drop(PROTEIN_V)
+            .rename({f"{PROTEIN_U}_right": PROTEIN_V})
+            .with_columns(sort_prot_cols(PROTEIN_U, PROTEIN_V))
+            .filter(pl.col(PROTEIN_U) != pl.col(PROTEIN_V))
+            .unique(maintain_order=True)
+            .join(df_ppin.lazy(), on=[PROTEIN_U, PROTEIN_V], how="anti")
+            .collect()
+        )
+
+        assert_prots_sorted(df_l2_ppin)
+        return df_l2_ppin
 
     def get_prot_weighted_deg(self) -> pl.Expr:
         """
@@ -109,7 +138,7 @@ class TopoScoring:
                     W_DEG: f"{W_DEG}_{PROTEIN_X}",
                 }
             )
-            .collect(streaming=True)
+            .collect()
         )
 
         return df
@@ -174,13 +203,6 @@ class TopoScoring:
             how="horizontal",
         )
 
-        print(
-            df_joined.filter(
-                (pl.col(PROTEIN_U) == "YCR094W") & (pl.col(PROTEIN_V) == "YEL070W")
-            )
-        )
-        # YCR094W,YJR091C
-        # YCR094W   ┆ YEL070W
         df_w_ppin_batch = (
             df_joined.lazy()
             .with_columns(
@@ -197,7 +219,7 @@ class TopoScoring:
             .with_columns((pl.col(NUMERATOR) / pl.col(DENOMINATOR)).alias(SCORE))
             .drop([NUMERATOR, DENOMINATOR])
             .select([PROTEIN_U, PROTEIN_V, SCORE])
-            .collect(streaming=True)
+            .collect()
         )
 
         return df_w_ppin_batch
@@ -208,7 +230,6 @@ class TopoScoring:
         df_neighbors: pl.DataFrame,
         avg_prot_w_deg: float,
         SCORE: str = TOPO,
-        n_batches: int = 1,
     ) -> pl.DataFrame:
         """
         Scores the each PPI of the PPIN.
@@ -221,14 +242,17 @@ class TopoScoring:
         Returns:
             pl.DataFrame: _description_
         """
-        if n_batches == 1 or n_batches == 0:
+        if self.n_batches == 1:
+            print(
+                f">>> NOTE: if memory allocation failed, score by batches by adjusting n_batches"
+            )
             df_w_ppin = self.score_batch(df_w_ppin, df_neighbors, avg_prot_w_deg, SCORE)
         else:
-            print(f">>> DATAFRAME TOO LARGE, SCORING BY {n_batches} BATCHES")
+            print(f">>> DATAFRAME TOO LARGE, SCORING BY {self.n_batches} BATCHES")
             size_df = df_w_ppin.shape[0]
-            batch_size = size_df // n_batches
+            batch_size = size_df // self.n_batches
             df_scored_batches: List[pl.DataFrame] = []
-            for i in range(n_batches + 1):
+            for i in range(self.n_batches + 1):
                 start = batch_size * i
                 if start < size_df:
                     end = batch_size * (i + 1)
@@ -240,27 +264,6 @@ class TopoScoring:
                     print(f">>> DONE SCORING BATCH={i} | BATCH_SIZE = {end - start}")
             df_w_ppin = pl.concat(df_scored_batches, how="vertical")
         return df_w_ppin
-
-    def construct_l2_network(self, df_ppin: pl.DataFrame) -> pl.DataFrame:
-        df_ppin_rev = df_ppin.select(
-            [pl.col(PROTEIN_U).alias(PROTEIN_V), pl.col(PROTEIN_V).alias(PROTEIN_U)]
-        ).select([PROTEIN_U, PROTEIN_V])
-
-        df_ppin = pl.concat([df_ppin, df_ppin_rev], how="vertical")
-        lf_ppin = df_ppin.lazy()
-        df_l2_ppin = (
-            lf_ppin.join(lf_ppin, on=PROTEIN_V, how="inner")
-            .drop(PROTEIN_V)
-            .rename({f"{PROTEIN_U}_right": PROTEIN_V})
-            .with_columns(sort_prot_cols(PROTEIN_U, PROTEIN_V))
-            .filter(pl.col(PROTEIN_U) != pl.col(PROTEIN_V))
-            .unique(maintain_order=True)
-            .join(df_ppin.lazy(), on=[PROTEIN_U, PROTEIN_V], how="anti")
-            .collect(streaming=True)
-        )
-
-        assert_prots_sorted(df_l2_ppin)
-        return df_l2_ppin
 
     def weight(self, k: int, df_l1_ppin: pl.DataFrame, df_l2_ppin: pl.DataFrame):
         df_w_ppin = pl.DataFrame()
@@ -285,7 +288,7 @@ class TopoScoring:
             ).fill_null(0.0)
             print(df_w_ppin)
             print()
-        df_w_ppin = df_w_ppin.filter((pl.col(TOPO_L2) > 0.1))
+        df_w_ppin = df_w_ppin.filter((pl.col(TOPO_L2) > 0.1) | (pl.col(TOPO) > 0))
         return df_w_ppin
 
     def main(self, df_ppin: pl.DataFrame, k: int = 2) -> pl.DataFrame:
@@ -305,23 +308,9 @@ class TopoScoring:
         # Weighted PPIN at k=0
         df_l1_ppin = df_ppin.with_columns(pl.lit(1.0).alias(TOPO))
         df_l2_ppin = self.construct_l2_network(df_ppin).with_columns(
-            pl.lit(1.0).alias(TOPO_L2)
+            pl.lit(0.0).alias(TOPO_L2)
         )
-        df_w_ppin = self.weight(2, df_l1_ppin, df_l2_ppin)
-
-        # print("ppppppppppppppppppppppppp")
-        # print(df_l2_ppin.filter(pl.col(PROTEIN_U) == "YEL070W"))
-
-        # df_l2_ppin = self.weight(2, df_l2_ppin, TOPO_L2, 10).filter(
-        #     pl.col(TOPO_L2) > 0.1
-        # )
-
-        # print(df_l2_ppin)
-
-        # print("------------------------")
-        # df_w_ppin = df_l1_ppin.join(
-        #     df_l2_ppin, on=[PROTEIN_U, PROTEIN_V], how="outer"
-        # ).fill_null(0.0)
+        df_w_ppin = self.weight(k, df_l1_ppin, df_l2_ppin)
 
         print("-------------------- END: TOPO SCORING -------------------")
 
@@ -346,27 +335,31 @@ if __name__ == "__main__":
     print(f"Num of proteins: {num_proteins}")
     print("-------------------------------------------")
 
-    topo_scoring = TopoScoring()
+    topo_scoring = TopoScoring(n_batches=1)
     df_w_ppin = topo_scoring.main(df_ppin, 2)
 
     print()
     print(f">>> [{TOPO} and {TOPO_L2}] Scored PPIN")
     print(df_w_ppin)
 
-    df_w_ppin.write_csv("../data/scores/dip_topo.csv", has_header=True)
+    df_swc = pl.read_csv("../data/scores/swc_composite_scores.csv").drop(
+        [TOPO, TOPO_L2]
+    )
 
-    # df_w_ppin = pl.read_csv("../data/scores/dip_topo.csv")
-    # df_swc = pl.read_csv("../data/scores/swc_composite_scores.csv").drop(
-    #     [TOPO, TOPO_L2]
-    # )
+    df_dip = (
+        df_w_ppin.join(df_swc, on=[PROTEIN_U, PROTEIN_V], how="outer")
+        .fill_null(0.0)
+        .filter(pl.sum(SWC_FEATS) > 0)
+    )
 
-    # df_dip = (
-    #     df_w_ppin.join(df_swc, on=[PROTEIN_U, PROTEIN_V], how="outer")
-    #     .fill_null(0.0)
-    #     .filter(pl.sum(SWC_FEATS) > 0)
-    # )
+    print(f">>> PREPROCESSED DIP COMPOSITE NETWORK")
+    print(df_dip)
 
-    # print(df_dip)
+    df_dip.write_csv("../data/scores/dip_swc_composite_scores.csv", has_header=True)
+
+    df_dip.select([PROTEIN_U, PROTEIN_V]).write_csv(
+        "../data/preprocessed/dip_edges.csv", has_header=False
+    )
 
     print(f">>> [{TOPO}] Execution Time")
     print(time.time() - start_time)

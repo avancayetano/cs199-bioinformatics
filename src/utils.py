@@ -36,7 +36,9 @@ def sort_prot_cols(prot_u: str, prot_v: str) -> List[pl.Expr]:
     return exp
 
 
-def construct_composite_network(features: Optional[List[str]] = None) -> pl.DataFrame:
+def construct_composite_network(
+    features: Optional[List[str]] = None, dip: bool = False
+) -> pl.DataFrame:
     """
     Constructs the composite protein network based on the selected features.
     By default, gets all the features.
@@ -44,12 +46,12 @@ def construct_composite_network(features: Optional[List[str]] = None) -> pl.Data
     Returns:
         pl.DataFrame: _description_
     """
-
+    prefix = "dip_" if dip else ""
     scores_files = [
-        "co_exp_scores.csv",
-        "go_ss_scores.csv",
-        "rel_scores.csv",
-        "swc_composite_scores.csv",
+        f"{prefix}co_exp_scores.csv",
+        f"{prefix}go_ss_scores.csv",
+        f"{prefix}rel_scores.csv",
+        f"{prefix}swc_composite_scores.csv",
     ]
 
     lf_composite = pl.LazyFrame()
