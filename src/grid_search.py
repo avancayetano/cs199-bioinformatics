@@ -18,6 +18,7 @@ from sklearn.naive_bayes import CategoricalNB
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.svm import SVC, LinearSVC
+from xgboost import XGBClassifier, XGBRFClassifier
 
 from aliases import (
     FEATURES,
@@ -41,6 +42,8 @@ Model = Union[
     MLPClassifier,
     Pipeline,
     VotingClassifier,
+    XGBClassifier,
+    XGBRFClassifier,
 ]
 
 
@@ -185,6 +188,20 @@ class GridSearch:
                     "mlp__activation": ["relu", "logistic"],
                     "mlp__solver": ["adam", "sgd"],
                 }
+
+            elif type(model) == XGBClassifier:
+                parameters = {
+                    "n_estimators": [3000],
+                    "learning_rate": [0.1, 0.5, 1.0],
+                    "max_depth": [4, 6],
+                    "alpha": [0, 5, 10],
+                }
+            elif type(model) == XGBRFClassifier:
+                parameters = {
+                    "n_estimators": [500],
+                    "criterion": ["entropy"],
+                    "max_features": ["sqrt"],
+                }
             else:
                 parameters = {}
 
@@ -268,7 +285,10 @@ class GridSearch:
             voting="soft",
         )
 
-        models = [mlp]
+        xgw = XGBClassifier(n_jobs=-1, random_state=12345)
+        xgrfw = XGBClassifier(n_jobs=-1, random_state=12345)
+
+        models = [xgw]
         for model in models:
             print("----------------------------------")
             tuned = self.tune(model)
@@ -286,54 +306,3 @@ if __name__ == "__main__":
 
     print(f"Execution time: {time.time() - start_time}")
     print("================ END ====================")
-
-    # rf = SupervisedWeighting(
-    #     RandomForestClassifier(
-    #         n_estimators=2000,
-    #         criterion="entropy",
-    #         max_features="sqrt",
-    #         n_jobs=-1,
-    #         random_state=6789,
-    #     ),
-    #     "RF",
-    # )
-    # mlp = SupervisedWeighting(
-    #     MLPClassifier(
-    #         hidden_layer_sizes=(200,),
-    #         solver="sgd",
-    #         activation="logistic",
-    #         alpha=0.1,
-    #         random_state=6789,
-    #         max_iter=10000,
-    #     ),
-    #     "MLP",
-    # )
-    # rf_mlp = SupervisedWeighting(
-    #     VotingClassifier(
-    #         estimators=[
-    #             (
-    #                 "rf",
-    #                 RandomForestClassifier(
-    #                     n_estimators=2000,
-    #                     criterion="entropy",
-    #                     max_features="sqrt",
-    #                     n_jobs=-1,
-    #                     random_state=6789,
-    #                 ),
-    #             ),
-    #             (
-    #                 "mlp",
-    #                 MLPClassifier(
-    #                     hidden_layer_sizes=(200,),
-    #                     solver="sgd",
-    #                     activation="logistic",
-    #                     alpha=0.1,
-    #                     random_state=6789,
-    #                     max_iter=10000,
-    #                 ),
-    #             ),
-    #         ],
-    #         voting="soft",
-    #     ),
-    #     "RF_MLP",
-    # )

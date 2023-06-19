@@ -5,7 +5,19 @@ import matplotlib.pyplot as plt
 import polars as pl
 import seaborn as sns
 
-from aliases import FEATURES, IS_CO_COMP, IS_NIP, PROTEIN, PROTEIN_U, PROTEIN_V, TOPO
+from aliases import (
+    CO_OCCUR,
+    FEATURES,
+    IS_CO_COMP,
+    IS_NIP,
+    PROTEIN,
+    PROTEIN_U,
+    PROTEIN_V,
+    STRING,
+    SWC_FEATS,
+    TOPO,
+    TOPO_L2,
+)
 from model_preprocessor import ModelPreprocessor
 from utils import construct_composite_network, get_cyc_comp_pairs, get_unique_proteins
 
@@ -223,14 +235,24 @@ class ExploratoryDataAnalysis:
             f"Mean feature values of CYC2008 complex pairs.\n Non-interacting: {n_ppi} | Interacting: {n_non_ppi}"
         )
 
+    def explore_swc_features(self):
+        print(self.df_composite)
+        df = self.df_composite.select(SWC_FEATS).filter(
+            (pl.col(TOPO_L2) > 0)
+            & (pl.col(TOPO) == 0)
+            & (pl.col(CO_OCCUR) == 0)
+            & (pl.col(STRING) == 0)
+        )
+        print(df)
+
     def main(self):
-        print(self.df_composite.select(self.features).describe())
+        # print(self.df_composite.select(self.features).describe())
         self.df_composite = self.model_prep.normalize_features(
             self.df_composite, self.features
         )
-        print(self.df_composite.select(self.features).describe())
+        # print(self.df_composite.select(self.features).describe())
 
-        self.num_co_comp_pairs()
+        # self.num_co_comp_pairs()
         # self.features_heatmap()
         # self.features_dist_hist()
         # self.explore_co_complexes()
@@ -239,6 +261,7 @@ class ExploratoryDataAnalysis:
         # self.nip_co_comp_intersection()
         # self.explore_co_comp_pairs()
         # plt.show()
+        self.explore_swc_features()
 
 
 if __name__ == "__main__":

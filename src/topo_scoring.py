@@ -1,10 +1,11 @@
 import time
+from typing import List
 
 import polars as pl
 
 from aliases import PROTEIN, PROTEIN_U, PROTEIN_V, TOPO, TOPO_L2
 from assertions import assert_prots_sorted
-from utils import sort_prot_cols
+from utils import get_unique_proteins, sort_prot_cols
 
 NEIGHBORS = "NEIGHBORS"
 W_DEG = "W_DEG"
@@ -30,7 +31,7 @@ class TopoScoring:
             pl.col(NEIGHBORS).list.eval(pl.element().list.get(1).cast(float)).list.sum()
         ).alias(W_DEG)
 
-    def get_neighbors(self, df_w_ppin: pl.DataFrame, SCORE: str = TOPO) -> pl.LazyFrame:
+    def get_neighbors(self, df_w_ppin: pl.DataFrame, SCORE: str = TOPO) -> pl.DataFrame:
         """
         Returns a DF where
         - first column is a unique protein;
@@ -46,7 +47,7 @@ class TopoScoring:
         TODO: Is there a better way to represent the second column?
         """
 
-        lf_neighbors = (
+        df_neighbors = (
             df_w_ppin.vstack(
                 df_w_ppin.select(
                     [
@@ -57,39 +58,32 @@ class TopoScoring:
                 )
             )
             .lazy()
-            .groupby(pl.col(PROTEIN_U))
-            .agg((pl.concat_list([pl.col(PROTEIN_V), pl.col(SCORE)])))
+            .groupby(pl.col(PROTEIN_U), maintain_order=True)
+            .agg(pl.concat_list([pl.col(PROTEIN_V), pl.col(SCORE)]))
             .rename({PROTEIN_U: PROTEIN, PROTEIN_V: NEIGHBORS})
             .with_columns(self.get_prot_weighted_deg())
+            .collect()
         )
 
-        return lf_neighbors
+        assert df_neighbors.select(PROTEIN).is_unique().all()
+
+        return df_neighbors
 
     def get_avg_prot_w_deg(
-        self, df_w_ppin: pl.DataFrame, num_proteins: int, SCORE: str = TOPO
+        self, df_neighbors: pl.DataFrame, SCORE: str = TOPO
     ) -> float:
         """
         Gets the average weighted degree of all the proteins.
-
-        Args:
-            df_w_ppin (pl.DataFrame): _description_
-            num_proteins (int): _description_
-
-        Returns:
-            float: _description_
         """
 
-        avg_weight = (
-            df_w_ppin.lazy()
-            .select((pl.col(SCORE).sum() * 2) / num_proteins)
-            .collect(streaming=True)
-            .item()
-        )
+        avg_weight = df_neighbors.select(
+            (pl.col(W_DEG).sum()) / pl.count(PROTEIN)
+        ).item()
         return avg_weight
 
     def join_prot_neighbors(
-        self, lf_w_ppin: pl.LazyFrame, lf_neighbors: pl.LazyFrame, PROTEIN_X: str
-    ) -> pl.LazyFrame:
+        self, df_w_ppin: pl.DataFrame, df_neighbors: pl.DataFrame, PROTEIN_X: str
+    ) -> pl.DataFrame:
         """
         Augments the df_w_ppin such that the new DF contains
         - Neighbors col: list of PROTEIN_X's neighbors (List[List[PROT, TOPO]])
@@ -104,10 +98,11 @@ class TopoScoring:
             pl.DataFrame: _description_
         """
 
-        lf = (
-            lf_w_ppin.select(pl.col(PROTEIN_X))
+        df = (
+            df_w_ppin.lazy()
+            .select(pl.col(PROTEIN_X))
             .join(
-                lf_neighbors,
+                df_neighbors.lazy(),
                 left_on=PROTEIN_X,
                 right_on=PROTEIN,
                 how="inner",
@@ -118,9 +113,10 @@ class TopoScoring:
                     W_DEG: f"{W_DEG}_{PROTEIN_X}",
                 }
             )
+            .collect(streaming=True)
         )
 
-        return lf
+        return df
 
     def numerator_expr(self) -> pl.Expr:
         """
@@ -166,39 +162,24 @@ class TopoScoring:
             )
         ).alias(DENOMINATOR)
 
-    def score(
+    def score_batch(
         self,
-        df_w_ppin: pl.LazyFrame,
-        df_neighbors: pl.LazyFrame,
+        df_w_ppin_batch: pl.DataFrame,
+        df_neighbors: pl.DataFrame,
         avg_prot_w_deg: float,
-        SCORE: str = TOPO,
-    ) -> pl.DataFrame:
-        """
-        Scores the each PPI of the PPIN.
+        SCORE: str,
+    ):
+        df_joined = pl.concat(
+            [
+                self.join_prot_neighbors(df_w_ppin_batch, df_neighbors, PROTEIN_U),
+                self.join_prot_neighbors(df_w_ppin_batch, df_neighbors, PROTEIN_V),
+                df_w_ppin_batch.select(pl.col(SCORE)),
+            ],
+            how="horizontal",
+        )
 
-        Args:
-            df_w_ppin (pl.DataFrame): _description_
-            df_neighbors (pl.DataFrame): _description_
-            avg_prot_w_deg (float): _description_
-
-        Returns:
-            pl.DataFrame: _description_
-        """
-
-        lf_w_ppin = (
-            pl.concat(
-                [
-                    self.join_prot_neighbors(
-                        df_w_ppin, df_neighbors, PROTEIN_U
-                    ).collect(streaming=True),
-                    self.join_prot_neighbors(
-                        df_w_ppin, df_neighbors, PROTEIN_V
-                    ).collect(streaming=True),
-                    df_w_ppin.select(pl.col(SCORE)).collect(streaming=True),
-                ],
-                how="horizontal",
-            )
-            .lazy()
+        df_w_ppin_batch = (
+            df_joined.lazy()
             .with_columns(
                 [self.numerator_expr(), self.denominator_expr(avg_prot_w_deg)]
             )
@@ -213,10 +194,49 @@ class TopoScoring:
             .with_columns((pl.col(NUMERATOR) / pl.col(DENOMINATOR)).alias(SCORE))
             .drop([NUMERATOR, DENOMINATOR])
             .select([PROTEIN_U, PROTEIN_V, SCORE])
-            # .collect(streaming=True)
+            .collect(streaming=True)
         )
 
-        return lf_w_ppin.collect(streaming=True)
+        return df_w_ppin_batch
+
+    def score(
+        self,
+        df_w_ppin: pl.DataFrame,
+        df_neighbors: pl.DataFrame,
+        avg_prot_w_deg: float,
+        SCORE: str = TOPO,
+        n_batches: int = 1,
+    ) -> pl.DataFrame:
+        """
+        Scores the each PPI of the PPIN.
+
+        Args:
+            df_w_ppin (pl.DataFrame): _description_
+            df_neighbors (pl.DataFrame): _description_
+            avg_prot_w_deg (float): _description_
+
+        Returns:
+            pl.DataFrame: _description_
+        """
+        if n_batches == 1 or n_batches == 0:
+            df_w_ppin = self.score_batch(df_w_ppin, df_neighbors, avg_prot_w_deg, SCORE)
+        else:
+            print(f">>> DATAFRAME TOO LARGE, SCORING BY {n_batches} BATCHES")
+            size_df = df_w_ppin.shape[0]
+            batch_size = size_df // n_batches
+            df_scored_batches: List[pl.DataFrame] = []
+            for i in range(n_batches + 1):
+                start = batch_size * i
+                if start < size_df:
+                    end = batch_size * (i + 1)
+                    df_w_ppin_batch = df_w_ppin.slice(start, end - start)
+                    df_w_ppin_batch = self.score_batch(
+                        df_w_ppin_batch, df_neighbors, avg_prot_w_deg, SCORE
+                    )
+                    df_scored_batches.append(df_w_ppin_batch)
+                    print(f">>> DONE SCORING BATCH={i} | BATCH_SIZE = {end - start}")
+            df_w_ppin = pl.concat(df_scored_batches, how="vertical")
+        return df_w_ppin
 
     def construct_l2_network(self, df_ppin: pl.DataFrame) -> pl.DataFrame:
         df_ppin_rev = df_ppin.select(
@@ -232,28 +252,33 @@ class TopoScoring:
             .with_columns(sort_prot_cols(PROTEIN_U, PROTEIN_V))
             .filter(pl.col(PROTEIN_U) != pl.col(PROTEIN_V))
             .unique(maintain_order=True)
+            .join(df_ppin.lazy(), on=[PROTEIN_U, PROTEIN_V], how="anti")
             .collect(streaming=True)
         )
 
         assert_prots_sorted(df_l2_ppin)
         return df_l2_ppin
 
-    def weight(self, k: int, df_w_ppin: pl.DataFrame, SCORE: str = TOPO):
-        for _ in range(k):
-            lf_neighbors = self.get_neighbors(df_w_ppin, SCORE)
+    def weight(
+        self, k: int, df_w_ppin: pl.DataFrame, SCORE: str = TOPO, n_batches: int = 1
+    ):
+        for i in range(k):
+            df_neighbors = self.get_neighbors(df_w_ppin, SCORE)
+            print()
+            print(f"-------------- ADJUSTCD ITERATION = {i} --------------------")
+            print(">>> DF NEIGHBORS")
+            print(df_neighbors)
 
-            num_proteins = lf_neighbors.collect().shape[0]
-
-            avg_prot_w_deg = self.get_avg_prot_w_deg(df_w_ppin, num_proteins, SCORE)
-            print(">>> AVG PROT TOPO")
+            avg_prot_w_deg = self.get_avg_prot_w_deg(df_neighbors, SCORE)
+            print(">>> AVG PROT W_DEG")
             print(avg_prot_w_deg)
 
             df_w_ppin = self.score(
-                df_w_ppin.lazy(), lf_neighbors, avg_prot_w_deg, SCORE
+                df_w_ppin, df_neighbors, avg_prot_w_deg, SCORE, n_batches
             )
-            print(">>> DF_W_PPIN")
+            print(f">>> DF_W_PPIN | k = {k}")
             print(df_w_ppin)
-
+            print()
         return df_w_ppin
 
     def main(self, df_ppin: pl.DataFrame, k: int = 2) -> pl.DataFrame:
@@ -280,16 +305,22 @@ class TopoScoring:
             pl.lit(1.0).alias(TOPO_L2)
         )
 
-        df_l2_ppin = self.weight(2, df_l2_ppin, TOPO_L2)
+        print(df_l2_ppin)
+
+        df_l2_ppin = self.weight(2, df_l2_ppin, TOPO_L2, 10).filter(
+            pl.col(TOPO_L2) > 0.1
+        )
 
         print(df_l2_ppin)
 
         print("------------------------")
-        # df_w_ppin = df_l1_ppin.join(df_l2_ppin, on=[PROTEIN_U, PROTEIN_V], how="outer")
+        df_w_ppin = df_l1_ppin.join(
+            df_l2_ppin, on=[PROTEIN_U, PROTEIN_V], how="outer"
+        ).fill_null(0.0)
 
         print("-------------------- END: TOPO SCORING -------------------")
 
-        return df_l1_ppin
+        return df_w_ppin
 
 
 if __name__ == "__main__":
@@ -305,6 +336,11 @@ if __name__ == "__main__":
 
     assert_prots_sorted(df_ppin)
     print(df_ppin)
+    num_proteins = get_unique_proteins(df_ppin).shape[0]
+
+    print(f"Num of proteins: {num_proteins}")
+    print("-------------------------------------------")
+
     topo_scoring = TopoScoring()
     df_w_ppin = topo_scoring.main(df_ppin, 2)
 

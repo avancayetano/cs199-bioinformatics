@@ -4,10 +4,16 @@ from typing import List, Union
 
 import polars as pl
 from sklearn.base import BaseEstimator
-from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+from sklearn.ensemble import (
+    GradientBoostingClassifier,
+    HistGradientBoostingClassifier,
+    RandomForestClassifier,
+    VotingClassifier,
+)
 from sklearn.naive_bayes import CategoricalNB
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
+from xgboost import XGBClassifier, XGBRFClassifier
 
 from aliases import (
     IS_CO_COMP,
@@ -15,6 +21,7 @@ from aliases import (
     PROBA_NON_CO_COMP,
     PROTEIN_U,
     PROTEIN_V,
+    TOPO_L2,
     WEIGHT,
 )
 from assertions import assert_no_zero_weight
@@ -25,6 +32,10 @@ Model = Union[
     MLPClassifier,
     Pipeline,
     VotingClassifier,
+    XGBClassifier,
+    XGBRFClassifier,
+    GradientBoostingClassifier,
+    HistGradientBoostingClassifier,
 ]
 
 
@@ -58,7 +69,6 @@ class SupervisedWeighting:
 
         if self.model is None:
             return df_composite
-
         selected_features = df_composite.select(
             pl.exclude([PROTEIN_U, PROTEIN_V, self.label])
         ).columns
@@ -91,7 +101,9 @@ class SupervisedWeighting:
             except:
                 pass
         self.model.fit(X_train, y_train)  # training the model
+
         print("Training done!")
+        print(self.model.feature_importances_)
 
         # After learning the parameters, weight all protein pairs
         X = df_composite.select(selected_features).to_numpy()

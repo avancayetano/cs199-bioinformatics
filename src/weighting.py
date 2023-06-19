@@ -6,7 +6,12 @@ import time
 from typing import List
 
 import polars as pl
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import (
+    GradientBoostingClassifier,
+    HistGradientBoostingClassifier,
+    RandomForestClassifier,
+)
+from xgboost import XGBClassifier, XGBRFClassifier
 
 from aliases import (
     FEATURES,
@@ -65,34 +70,34 @@ if __name__ == "__main__":
     df_composite = construct_composite_network()
     df_composite = model_prep.normalize_features(df_composite, FEATURES)
 
-    print("---------------------------------------------------------")
-    print("Writing unweighted network")
-    df_unweighted = (
-        df_composite.filter(pl.col(TOPO) > 0)
-        .with_columns(pl.lit(1.0).alias(WEIGHT))
-        .select([PROTEIN_U, PROTEIN_V, WEIGHT])
-    )
+    # print("---------------------------------------------------------")
+    # print("Writing unweighted network")
+    # df_unweighted = (
+    #     df_composite.filter(pl.col(TOPO) > 0)
+    #     .with_columns(pl.lit(1.0).alias(WEIGHT))
+    #     .select([PROTEIN_U, PROTEIN_V, WEIGHT])
+    # )
 
-    df_unweighted.write_csv(
-        "../data/weighted/unweighted.csv", has_header=False, separator="\t"
-    )
-    print("Done writing unweighted network")
-    print()
+    # df_unweighted.write_csv(
+    #     "../data/weighted/unweighted.csv", has_header=False, separator="\t"
+    # )
+    # print("Done writing unweighted network")
+    # print()
 
-    print("------------- BEGIN: FEATURE WEIGHTING ----------------------")
-    feat_weighting = FeatureWeighting()
-    for f in FEATURES:
-        df_f_weighted = feat_weighting.main(df_composite, [f], f)
-        print(f"Done feature weighting using: {f}")
-        assert_df_bounded(df_f_weighted, [WEIGHT])
-    print("------------- END: FEATURE WEIGHTING ----------------------\n\n")
+    # print("------------- BEGIN: FEATURE WEIGHTING ----------------------")
+    # feat_weighting = FeatureWeighting()
+    # for f in FEATURES:
+    #     df_f_weighted = feat_weighting.main(df_composite, [f], f)
+    #     print(f"Done feature weighting using: {f}")
+    #     assert_df_bounded(df_f_weighted, [WEIGHT])
+    # print("------------- END: FEATURE WEIGHTING ----------------------\n\n")
 
-    print("------------- BEGIN: SUPER FEATURE WEIGHTING ----------------------")
-    for f in SUPER_FEATS:
-        df_f_weighted = feat_weighting.main(df_composite, f["features"], f["name"])
-        print(f"Done feature weighting using: {f['name']} - {f['features']}")
-        assert_df_bounded(df_f_weighted, [WEIGHT])
-    print("------------- END: SUPER FEATURE WEIGHTING ----------------------\n\n")
+    # print("------------- BEGIN: SUPER FEATURE WEIGHTING ----------------------")
+    # for f in SUPER_FEATS:
+    #     df_f_weighted = feat_weighting.main(df_composite, f["features"], f["name"])
+    #     print(f"Done feature weighting using: {f['name']} - {f['features']}")
+    #     assert_df_bounded(df_f_weighted, [WEIGHT])
+    # print("------------- END: SUPER FEATURE WEIGHTING ----------------------\n\n")
 
     print("------------- BEGIN: SUPERVISED WEIGHTING ----------------------")
     n_iters = 10
@@ -109,7 +114,27 @@ if __name__ == "__main__":
         ),
         "RFW",
     )
+    xgw_params = {
+        "objective": "binary:logistic",
+        "n_estimators": 10000,
+        "alpha": 30,
+        "max_depth": 3,
+        "subsample": 0.5,
+        "n_jobs": -1,
+        "learning_rate": 0.01,
+    }
+    xgw = SupervisedWeighting(XGBClassifier(**xgw_params), "XGW")
+    # gbw = SupervisedWeighting(
+    #     HistGradientBoostingClassifier(
+    #         max_iter=3000, l2_regularization=0.5, learning_rate=0.05
+    #     ),
+    #     "GBW",
+    # )
+    # xgrfw_params = {
+    #     "n_estimators": 3000,
+    # }
 
+    # xgrfw = SupervisedWeighting(XGBRFClassifier(**xgrfw_params), "XGRFW")
     df_comp_pairs = get_cyc_comp_pairs()
 
     for xval_iter in range(n_iters):
@@ -147,7 +172,10 @@ if __name__ == "__main__":
         )
 
         # Weight the network using RFW
-        df_w_rfw = rfw.main(df_composite, df_train_labeled, xval_iter)
+        # df_w_rfw = rfw.main(df_composite, df_train_labeled, xval_iter)
+        df_w_xgw = xgw.main(df_composite, df_train_labeled, xval_iter)
+        # df_w_gbw = gbw.main(df_composite, df_train_labeled, xval_iter)
+        # df_w_xgrfw = xgrfw.main(df_composite, df_train_labeled, xval_iter)
 
         print(f"------------------- END: ITER {xval_iter} ---------------------\n\n")
 

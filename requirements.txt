@@ -31,7 +31,7 @@ parso==0.8.3
 pickleshare==0.7.5
 Pillow==9.5.0
 platformdirs==3.2.0
-polars==0.17.2
+polars==0.18.3
 prompt-toolkit==3.0.38
 psutil==5.9.4
 pure-eval==0.2.2
@@ -55,3 +55,4 @@ traitlets==5.9.0
 tzdata==2023.3
 urllib3==1.26.15
 wcwidth==0.2.6
+xgboost==1.7.5
