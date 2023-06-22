@@ -3,7 +3,16 @@ from typing import List
 
 import polars as pl
 
-from aliases import PROTEIN, PROTEIN_U, PROTEIN_V, SWC_FEATS, TOPO, TOPO_L2
+from aliases import (
+    CO_OCCUR,
+    PROTEIN,
+    PROTEIN_U,
+    PROTEIN_V,
+    STRING,
+    SWC_FEATS,
+    TOPO,
+    TOPO_L2,
+)
 from assertions import assert_prots_sorted
 from utils import get_unique_proteins, sort_prot_cols
 
@@ -344,6 +353,8 @@ if __name__ == "__main__":
     print(f">>> [{TOPO} and {TOPO_L2}] Scored PPIN")
     print(df_w_ppin)
 
+    print(df_w_ppin.describe())
+
     df_swc = pl.read_csv("../data/scores/swc_composite_scores.csv").drop(
         [TOPO, TOPO_L2]
     )
@@ -363,6 +374,17 @@ if __name__ == "__main__":
     df_dip.select([PROTEIN_U, PROTEIN_V]).write_csv(
         "../data/preprocessed/dip_edges.csv", has_header=False
     )
+
+    print("REFORMATTING THE DIP NETWORK FOR THE SWC SOFTWARE")
+    assert_prots_sorted(df_dip)
+    mapping = {TOPO: "PPI", TOPO_L2: "PPIL2", CO_OCCUR: "PUBMED", STRING: STRING}
+    df_dip_reformat = df_dip.rename(mapping).melt(
+        id_vars=[PROTEIN_U, PROTEIN_V], variable_name="FEATURE", value_name="SCORE"
+    )
+    df_dip_reformat.write_csv(
+        "../data/swc/dip_data_yeast.txt", has_header=False, separator="\t"
+    )
+    print(df_dip_reformat)
 
     print(f">>> [{TOPO}] Execution Time")
     print(time.time() - start_time)

@@ -114,6 +114,8 @@ Link:
 Command:
 `perl score_edges.pl -i data_yeast.txt -c complexes_CYC.txt -m x -x cross_val.csv -e 0 -o "swc"`
 
+`perl score_edges.pl -i dip_data_yeast.txt -c complexes_CYC.txt -m x -x dip_cross_val.csv -e 0 -o "dip_swc"`
+
 ### UniProt ID Mapping
 
 The UniProt Retrieve/ID mapping service was used to map each UniProtKB AC/ID in Negatome 2.0 to its corresponding KEGG entry (systematic name).

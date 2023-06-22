@@ -44,7 +44,12 @@ class FeatureWeighting:
             separator="\t",
         )
 
-        df_w_20k = df_w_composite.sort(pl.col(WEIGHT), descending=True).head(20_000)
+        df_w_20k = (
+            df_w_composite.sort(pl.col(WEIGHT), descending=True)
+            .head(20_000)
+            .filter(pl.col(WEIGHT) > 0)
+        )
+
         assert_no_zero_weight(df_w_20k)
         df_w_20k.write_csv(
             f"../data/weighted/20k_edges/features/{self.prefix}{name.lower()}_20k.csv",
@@ -63,7 +68,7 @@ class Weighting:
         prefix = "dip_" if dip else ""
         df_composite = construct_composite_network(dip=dip)
 
-        # df_composite = self.model_prep.normalize_features(df_composite, FEATURES)
+        df_composite = self.model_prep.normalize_features(df_composite, FEATURES)
 
         print()
         print(f"========================================================")
@@ -140,6 +145,11 @@ class Weighting:
                 .select([PROTEIN_U, PROTEIN_V, WEIGHT])
             )
 
+            print()
+            print("SWC SCORES DESCRIPTION")
+            print(df_w_swc.describe())
+            print()
+
             # Rewrite SWC scores to another file as a form of preprocessing because
             # it needs to be formatted before running MCL.
             df_w_swc.write_csv(
@@ -157,7 +167,11 @@ class Weighting:
 
             # Weight the network using XGW
             df_w_xgw = xgw.main(df_composite, df_train_labeled, xval_iter)
-            print(df_w_xgw)
+
+            print()
+            print("XGW SCORES DESCRIPTION")
+            print(df_w_xgw.describe())
+            print()
 
             print(
                 f"------------------- END: ITER {xval_iter} ---------------------\n\n"
@@ -173,16 +187,16 @@ if __name__ == "__main__":
     start = time.time()
     weighting = Weighting()
 
-    print(
-        "------------------------ Weighting the composite network --------------------"
-    )
-    weighting.main(dip=False)
-    print()
-
     # print(
-    #     "------------------------ Weighting the DIP composite network --------------------"
+    #     "------------------------ Weighting the composite network --------------------"
     # )
-    # weighting.main(dip=True)
+    # weighting.main(dip=False)
     # print()
+
+    print(
+        "------------------------ Weighting the DIP composite network --------------------"
+    )
+    weighting.main(dip=True)
+    print()
 
     print(f"Execution time: {time.time() - start}")

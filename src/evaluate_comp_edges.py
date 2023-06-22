@@ -56,7 +56,6 @@ class CompEdgesEvaluator:
         return path
 
     def main(self, dip: bool = False):
-        prefix = "dip_" if dip else ""
         evals = []
         print(f"Evaluating on these ({len(self.methods)}) methods: {self.methods}")
         print()
@@ -120,4 +119,15 @@ if __name__ == "__main__":
     pl.Config.set_tbl_rows(20)
 
     evaluator = CompEdgesEvaluator()
-    evaluator.main()
+
+    print(
+        "------------------------ Evaluating the composite network --------------------"
+    )
+    evaluator.main(dip=False)
+    print()
+
+    print(
+        "------------------------ Evaluating the DIP composite network --------------------"
+    )
+    evaluator.main(dip=True)
+    print()
