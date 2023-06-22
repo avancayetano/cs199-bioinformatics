@@ -246,11 +246,11 @@ class ExploratoryDataAnalysis:
         print(df)
 
     def main(self):
-        # print(self.df_composite.select(self.features).describe())
+        print(self.df_composite.select(self.features).describe())
         self.df_composite = self.model_prep.normalize_features(
             self.df_composite, self.features
         )
-        # print(self.df_composite.select(self.features).describe())
+        print(self.df_composite.select(self.features).describe())
 
         # self.num_co_comp_pairs()
         # self.features_heatmap()

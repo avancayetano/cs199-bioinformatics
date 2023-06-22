@@ -5,12 +5,14 @@ from typing import List, TypedDict
 import matplotlib.pyplot as plt
 import polars as pl
 import seaborn as sns
-from sklearn.metrics import auc, brier_score_loss, precision_recall_curve
+from sklearn.metrics import auc, brier_score_loss, log_loss, precision_recall_curve
 
 from aliases import (
     BRIER_SCORE,
+    F1_SCORE,
     FEATURES,
     IS_CO_COMP,
+    LOG_LOSS,
     METHOD,
     PR_AUC,
     PRECISION,
@@ -31,7 +33,7 @@ from utils import (
 
 class CompEdgesEvaluator:
     def __init__(self) -> None:
-        self.sv_methods = ["RFW", "SWC", "XGW", "GBW"]
+        self.sv_methods = ["SWC", "XGW"]
         self.feat_methods = FEATURES + [method["name"] for method in SUPER_FEATS]
         # self.methods = self.sv_methods + self.feat_methods
         self.methods = self.sv_methods
@@ -44,15 +46,17 @@ class CompEdgesEvaluator:
             df_composite, comp_pairs, IS_CO_COMP, -1, "all", False
         )
 
-    def get_w_network_path(self, method: str, xval_iter: int) -> str:
+    def get_w_network_path(self, method: str, xval_iter: int, dip: bool = False) -> str:
+        prefix = "dip_" if dip else ""
         if method in self.sv_methods:
-            path = f"../data/weighted/all_edges/cross_val/{method.lower()}_iter{xval_iter}.csv"
+            path = f"../data/weighted/all_edges/cross_val/{prefix}{method.lower()}_iter{xval_iter}.csv"
         else:
-            path = f"../data/weighted/all_edges/features/{method.lower()}.csv"
+            path = f"../data/weighted/all_edges/features/{prefix}{method.lower()}.csv"
 
         return path
 
-    def main(self):
+    def main(self, dip: bool = False):
+        prefix = "dip_" if dip else ""
         evals = []
         print(f"Evaluating on these ({len(self.methods)}) methods: {self.methods}")
         print()
@@ -63,7 +67,7 @@ class CompEdgesEvaluator:
                 df_train_pairs, on=[PROTEIN_U, PROTEIN_V], how="anti"
             )
             for method in self.methods:
-                path = self.get_w_network_path(method, xval_iter)
+                path = self.get_w_network_path(method, xval_iter, dip)
 
                 df_w = pl.read_csv(
                     path,
@@ -80,6 +84,7 @@ class CompEdgesEvaluator:
                 y_pred = df_pred.select(WEIGHT).to_numpy().ravel()
 
                 brier_score = brier_score_loss(y_true, y_pred, pos_label=1)
+                log_loss_metric = log_loss(y_true, y_pred)
 
                 precision, recall, thresholds = precision_recall_curve(
                     y_true, y_pred, pos_label=1
@@ -91,6 +96,7 @@ class CompEdgesEvaluator:
                         METHOD: method,
                         XVAL_ITER: xval_iter,
                         BRIER_SCORE: brier_score,
+                        LOG_LOSS: log_loss_metric,
                         PR_AUC: pr_auc,
                     }
                 )

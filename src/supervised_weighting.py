@@ -44,14 +44,11 @@ class SupervisedWeighting:
     Supervised co-complex probability weighting method.
     """
 
-    def __init__(
-        self,
-        model: Model,
-        name: str,
-    ):
+    def __init__(self, model: Model, name: str, dip: bool = False):
         self.label = IS_CO_COMP
         self.model = model
         self.name = name
+        self.prefix = "dip_" if dip else ""
 
     def weight(
         self, df_composite: pl.DataFrame, df_train_labeled: pl.DataFrame, xval_iter: int
@@ -97,6 +94,7 @@ class SupervisedWeighting:
                     pass
         else:
             try:
+                print(f"Setting random state to {xval_iter}")
                 self.model.set_params(random_state=xval_iter)
             except:
                 pass
@@ -135,7 +133,7 @@ class SupervisedWeighting:
         )
 
         df_w_composite.write_csv(
-            f"../data/weighted/all_edges/cross_val/{self.name.lower()}_iter{xval_iter}.csv",
+            f"../data/weighted/all_edges/cross_val/{self.prefix}{self.name.lower()}_iter{xval_iter}.csv",
             has_header=False,
             separator="\t",
         )
@@ -143,7 +141,7 @@ class SupervisedWeighting:
         df_w_20k = df_w_composite.sort(pl.col(WEIGHT), descending=True).head(20_000)
         assert_no_zero_weight(df_w_20k)
         df_w_20k.write_csv(
-            f"../data/weighted/20k_edges/cross_val/{self.name.lower()}_20k_iter{xval_iter}.csv",
+            f"../data/weighted/20k_edges/cross_val/{self.prefix}{self.name.lower()}_20k_iter{xval_iter}.csv",
             has_header=False,
             separator="\t",
         )

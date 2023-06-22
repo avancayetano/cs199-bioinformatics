@@ -35,9 +35,6 @@ class ModelPreprocessor:
             ],
             how="horizontal",
         )
-        print("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")
-        print(features)
-        print(scaler.get_feature_names_out())
 
         return df_composite
 
@@ -49,6 +46,9 @@ class ModelPreprocessor:
         label: str,
         xval_iter: int,
     ):
+        """
+        NOTE: legacy code. Not used at all. Originally intended for Naive-Bayes models.
+        """
         df_feat_label = df_labeled.join(
             df_composite, on=[PROTEIN_U, PROTEIN_V], how="left"
         )
@@ -68,6 +68,9 @@ class ModelPreprocessor:
         label: str,
         xval_iter: int,
     ) -> pl.DataFrame:
+        """
+        NOTE: legacy code. Not used at all. Originally intended for Naive-Bayes models.
+        """
         print()
         print("Discretizing the features (only for models that need discrete values)")
         if not os.path.exists(f"../data/training/discretized_bins_iter{xval_iter}.csv"):
@@ -114,6 +117,9 @@ class ModelPreprocessor:
         return df_composite_binned
 
     def get_cuts(self, xval_iter: int) -> Tuple[Dict[str, List[float]], List[str]]:
+        """
+        NOTE: legacy code. Not used at all. Originally intended for Naive-Bayes models.
+        """
         bins: Dict[str, List[float]] = {}
         feature = ""
         selected_feats: List[str] = []
