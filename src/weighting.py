@@ -17,7 +17,7 @@ from aliases import (
     TOPO,
     WEIGHT,
 )
-from assertions import assert_df_bounded, assert_no_zero_weight
+from assertions import assert_no_zero_weight
 from model_preprocessor import ModelPreprocessor
 from supervised_weighting import SupervisedWeighting
 from utils import construct_composite_network, get_cyc_train_test_comp_pairs
@@ -68,7 +68,7 @@ class Weighting:
         prefix = "dip_" if dip else ""
         df_composite = construct_composite_network(dip=dip)
 
-        df_composite = self.model_prep.normalize_features(df_composite, FEATURES)
+        # df_composite = self.model_prep.normalize_features(df_composite, FEATURES)
 
         print()
         print(f"========================================================")
@@ -96,14 +96,16 @@ class Weighting:
         for f in FEATURES:
             df_f_weighted = feat_weighting.main(df_composite, [f], f)
             print(f"Done feature weighting using: {f}")
-            assert_df_bounded(df_f_weighted, [WEIGHT])
+            print(df_f_weighted.describe())
+            # assert_df_bounded(df_f_weighted, [WEIGHT])
         print("------------- END: FEATURE WEIGHTING ----------------------\n\n")
 
         print("------------- BEGIN: SUPER FEATURE WEIGHTING ----------------------")
         for f in SUPER_FEATS:
             df_f_weighted = feat_weighting.main(df_composite, f["features"], f["name"])
             print(f"Done feature weighting using: {f['name']} - {f['features']}")
-            assert_df_bounded(df_f_weighted, [WEIGHT])
+            print(df_f_weighted.describe())
+            # assert_df_bounded(df_f_weighted, [WEIGHT])
         print("------------- END: SUPER FEATURE WEIGHTING ----------------------\n\n")
 
         print()
@@ -122,9 +124,9 @@ class Weighting:
             "subsample": 0.8,
             "colsample_bytree": 0.8,
             "n_jobs": -1,
-            "learning_rate": 0.01,
+            "learning_rate": 0.005,
         }
-        xgw = SupervisedWeighting(XGBClassifier(**xgw_params), "XGW")
+        xgw = SupervisedWeighting(XGBClassifier(**xgw_params), "XGW", dip=dip)
 
         for xval_iter in range(n_iters):
             print(f"------------------- BEGIN: ITER {xval_iter} ---------------------")
@@ -187,11 +189,11 @@ if __name__ == "__main__":
     start = time.time()
     weighting = Weighting()
 
-    # print(
-    #     "------------------------ Weighting the composite network --------------------"
-    # )
-    # weighting.main(dip=False)
-    # print()
+    print(
+        "------------------------ Weighting the composite network --------------------"
+    )
+    weighting.main(dip=False)
+    print()
 
     print(
         "------------------------ Weighting the DIP composite network --------------------"

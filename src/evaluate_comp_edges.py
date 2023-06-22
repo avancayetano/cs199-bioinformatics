@@ -35,8 +35,8 @@ class CompEdgesEvaluator:
     def __init__(self) -> None:
         self.sv_methods = ["SWC", "XGW"]
         self.feat_methods = FEATURES + [method["name"] for method in SUPER_FEATS]
-        # self.methods = self.sv_methods + self.feat_methods
-        self.methods = self.sv_methods
+        self.methods = self.sv_methods + self.feat_methods
+        # self.methods = self.sv_methods
         self.n_iters = 10
 
         model_prep = ModelPreprocessor()
