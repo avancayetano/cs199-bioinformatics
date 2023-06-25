@@ -11,7 +11,7 @@ from sklearn.metrics import PrecisionRecallDisplay, auc
 from aliases import FEATURES, PROTEIN_U, PROTEIN_V, SCENARIO, SUPER_FEATS, WEIGHT
 from assertions import assert_prots_sorted
 from utils import (
-    get_cluster_filename,
+    get_clusters_filename,
     get_clusters_list,
     get_complexes_list,
     get_weighted_filename,
@@ -77,6 +77,7 @@ class ClustersEvaluator:
         sv_methods: List[str],
         n_dens: int,
         n_iters: int,
+        dip: bool,
     ):
         self.inflations = inflations
         self.n_dens = n_dens
@@ -98,6 +99,7 @@ class ClustersEvaluator:
             * len(self.methods)
             * 2
         )
+        self.dip = dip
 
     def cluster_density(self, df_w: pl.DataFrame, cluster: Set[str]) -> float:
         if len(cluster) <= 1:
@@ -141,7 +143,7 @@ class ClustersEvaluator:
 
         unw_clusters: AllUnwClusters = {}
         df_unweighted = pl.read_csv(
-            get_weighted_filename("unweighted", False),
+            get_weighted_filename("unweighted", False, dip=self.dip),
             new_columns=[PROTEIN_U, PROTEIN_V, WEIGHT],
             separator="\t",
             has_header=False,
@@ -151,7 +153,7 @@ class ClustersEvaluator:
             sv_weighted[m] = {}
             for j in range(self.n_iters):
                 sv_weighted[m][j] = pl.read_csv(
-                    get_weighted_filename(m, True, f"_iter{j}"),
+                    get_weighted_filename(m, True, j, dip=self.dip),
                     new_columns=[PROTEIN_U, PROTEIN_V, WEIGHT],
                     separator="\t",
                     has_header=False,
@@ -159,7 +161,7 @@ class ClustersEvaluator:
 
         for m in self.feat_methods:
             feat_weighted[m] = pl.read_csv(
-                get_weighted_filename(m, False),
+                get_weighted_filename(m, False, dip=self.dip),
                 new_columns=[PROTEIN_U, PROTEIN_V, WEIGHT],
                 separator="\t",
                 has_header=False,
@@ -183,7 +185,7 @@ class ClustersEvaluator:
                     sv_clusters[I][e][m] = {}
                     for j in range(self.n_iters):
                         clusters = get_clusters_list(
-                            get_cluster_filename(e, m, True, I, f"_iter{j}")
+                            get_clusters_filename(e, m, True, I, j, dip=self.dip)
                         )
                         sv_clusters[I][e][m][j] = list(
                             map(
@@ -200,7 +202,9 @@ class ClustersEvaluator:
                         print(f"[{cache_idx}/{max_cache_idx}] Done caching")
 
                 for m in self.feat_methods:
-                    clusters = get_clusters_list(get_cluster_filename(e, m, False, I))
+                    clusters = get_clusters_list(
+                        get_clusters_filename(e, m, False, I, dip=self.dip)
+                    )
                     feat_clusters[I][e][m] = list(
                         map(
                             lambda cluster: {
@@ -216,7 +220,7 @@ class ClustersEvaluator:
                     print(f"[{cache_idx}/{max_cache_idx}] Done caching")
 
             clusters = get_clusters_list(
-                get_cluster_filename("", "unweighted", False, I)
+                get_clusters_filename("", "unweighted", False, I, dip=self.dip)
             )
             unw_clusters[I] = list(
                 map(
@@ -430,21 +434,21 @@ class ClustersEvaluator:
         """
         df_cluster_evals = pl.read_csv("../data/evals/cluster_evals.csv")
 
-        # df_all_050 = self.get_prec_recall_curve(df_cluster_evals, "all_edges", 0.5)
-        # df_all_075 = self.get_prec_recall_curve(df_cluster_evals, "all_edges", 0.75)
+        df_all_050 = self.get_prec_recall_curve(df_cluster_evals, "all_edges", 0.5)
+        df_all_075 = self.get_prec_recall_curve(df_cluster_evals, "all_edges", 0.75)
         df_20k_050 = self.get_prec_recall_curve(df_cluster_evals, "20k_edges", 0.5)
         df_20k_075 = self.get_prec_recall_curve(df_cluster_evals, "20k_edges", 0.75)
 
-        # df_all_050_auc = self.get_prec_recall_auc(df_all_050, "all_050")
-        # df_all_075_auc = self.get_prec_recall_auc(df_all_075, "all_075")
+        df_all_050_auc = self.get_prec_recall_auc(df_all_050, "all_050")
+        df_all_075_auc = self.get_prec_recall_auc(df_all_075, "all_075")
         df_20k_050_auc = self.get_prec_recall_auc(df_20k_050, "20k_050")
         df_20k_075_auc = self.get_prec_recall_auc(df_20k_075, "20k_075")
 
         # Print AUC summary of the four scenarios
         df_auc_summary = (
             pl.concat(
-                # [df_all_050_auc, df_all_075_auc, df_20k_050_auc, df_20k_075_auc],
-                [df_20k_050_auc, df_20k_075_auc],
+                [df_all_050_auc, df_all_075_auc, df_20k_050_auc, df_20k_075_auc],
+                # [df_20k_050_auc, df_20k_075_auc],
                 how="vertical",
             )
             .pivot(
@@ -459,12 +463,12 @@ class ClustersEvaluator:
             df_auc_summary.sort(AVG_AUC, descending=True).select(METHOD).head(n_methods)
         )
         # Plot the four curves
-        # self.plot_prec_recall_curve(
-        #     df_all_050, df_top_methods, f"all edges, match_thresh=0.5"
-        # )
-        # self.plot_prec_recall_curve(
-        #     df_all_075, df_top_methods, f"all edges, match_thresh=0.75"
-        # )
+        self.plot_prec_recall_curve(
+            df_all_050, df_top_methods, f"all edges, match_thresh=0.5"
+        )
+        self.plot_prec_recall_curve(
+            df_all_075, df_top_methods, f"all edges, match_thresh=0.75"
+        )
         self.plot_prec_recall_curve(
             df_20k_050, df_top_methods, f"20k edges, match_thresh=0.5"
         )
@@ -543,14 +547,18 @@ if __name__ == "__main__":
     sns.set_palette("deep")
     start = time.time()
     inflations = [4]
-    edges: Edges = ["20k_edges"]
+    edges: Edges = ["all_edges", "20k_edges"]
     feat_methods = [
         f.lower() for f in FEATURES + list(map(lambda sf: sf["name"], SUPER_FEATS))
     ]
-    sv_methods = ["cnb", "rf", "mlp", "swc", "rf_swc", "rf_mlp"]
-    n_dens = 5
-    n_iters = 1
+    sv_methods = ["swc", "xgw"]
+    n_dens = 50
+    n_iters = 10
 
+    print()
+    print(
+        "==================== CLUSTER EVALUATION ON COMPOSITE NETWORK =================="
+    )
     cluster_eval = ClustersEvaluator(
         inflations=inflations,
         edges=edges,
@@ -558,7 +566,27 @@ if __name__ == "__main__":
         sv_methods=sv_methods,
         n_dens=n_dens,
         n_iters=n_iters,
+        dip=False,
     )
-
     cluster_eval.main(re_eval=False)
+    print("==============================================================")
+    print()
+
+    print()
+    print(
+        "==================== CLUSTER EVALUATION ON DIP COMPOSITE NETWORK =================="
+    )
+    cluster_eval = ClustersEvaluator(
+        inflations=inflations,
+        edges=edges,
+        feat_methods=feat_methods,
+        sv_methods=sv_methods,
+        n_dens=n_dens,
+        n_iters=n_iters,
+        dip=True,
+    )
+    cluster_eval.main(re_eval=False)
+    print("==============================================================")
+    print()
+
     print(f"Execution Time: {time.time() - start}")

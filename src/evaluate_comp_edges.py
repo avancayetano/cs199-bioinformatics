@@ -28,45 +28,44 @@ from utils import (
     construct_composite_network,
     get_cyc_comp_pairs,
     get_cyc_train_test_comp_pairs,
+    get_weighted_filename,
 )
 
 
 class CompEdgesEvaluator:
-    def __init__(self) -> None:
+    def __init__(self, dip: bool):
         self.sv_methods = ["SWC", "XGW"]
         self.feat_methods = FEATURES + [method["name"] for method in SUPER_FEATS]
         self.methods = self.sv_methods + self.feat_methods
-        # self.methods = self.sv_methods
+        self.methods = self.sv_methods
         self.n_iters = 10
 
+        self.dip = dip
+
         model_prep = ModelPreprocessor()
-        df_composite = construct_composite_network()
+        df_composite = construct_composite_network(dip=self.dip)
         comp_pairs = get_cyc_comp_pairs()
         self.df_labeled = model_prep.label_composite(
             df_composite, comp_pairs, IS_CO_COMP, -1, "all", False
         )
 
-    def get_w_network_path(self, method: str, xval_iter: int, dip: bool = False) -> str:
-        prefix = "dip_" if dip else ""
-        if method in self.sv_methods:
-            path = f"../data/weighted/all_edges/cross_val/{prefix}{method.lower()}_iter{xval_iter}.csv"
-        else:
-            path = f"../data/weighted/all_edges/features/{prefix}{method.lower()}.csv"
-
-        return path
-
-    def main(self, dip: bool = False):
+    def main(self):
         evals = []
         print(f"Evaluating on these ({len(self.methods)}) methods: {self.methods}")
         print()
         for xval_iter in range(self.n_iters):
             print(f"Evaluating cross-val iteration: {xval_iter}")
-            df_train_pairs, df_test_pairs = get_cyc_train_test_comp_pairs(xval_iter)
+            df_train_pairs, _ = get_cyc_train_test_comp_pairs(xval_iter)
             df_composite_test = self.df_labeled.join(
                 df_train_pairs, on=[PROTEIN_U, PROTEIN_V], how="anti"
             )
             for method in self.methods:
-                path = self.get_w_network_path(method, xval_iter, dip)
+                path = get_weighted_filename(
+                    method.lower(),
+                    method in self.sv_methods,
+                    self.dip,
+                    xval_iter,
+                )
 
                 df_w = pl.read_csv(
                     path,
@@ -94,8 +93,8 @@ class CompEdgesEvaluator:
                     {
                         METHOD: method,
                         XVAL_ITER: xval_iter,
-                        BRIER_SCORE: brier_score,
                         LOG_LOSS: log_loss_metric,
+                        BRIER_SCORE: brier_score,
                         PR_AUC: pr_auc,
                     }
                 )
@@ -107,7 +106,7 @@ class CompEdgesEvaluator:
             .groupby(METHOD)
             .mean()
             .select(pl.exclude(XVAL_ITER))
-            .sort([BRIER_SCORE, PR_AUC], descending=[False, True])
+            .sort([LOG_LOSS, BRIER_SCORE, PR_AUC], descending=[False, False, True])
         )
         print()
         print("Average of all evaluations on all the cross-val iterations")
@@ -118,16 +117,16 @@ if __name__ == "__main__":
     pl.Config.set_tbl_cols(20)
     pl.Config.set_tbl_rows(20)
 
-    evaluator = CompEdgesEvaluator()
-
     print(
         "------------------------ Evaluating the composite network --------------------"
     )
-    evaluator.main(dip=False)
+    evaluator = CompEdgesEvaluator(dip=False)
+    evaluator.main()
     print()
 
     print(
         "------------------------ Evaluating the DIP composite network --------------------"
     )
-    evaluator.main(dip=True)
+    evaluator = CompEdgesEvaluator(dip=True)
+    evaluator.main()
     print()

@@ -176,6 +176,10 @@ data/training/**/*
 data/clusters/**/*
 !data/clusters/**/
 
+# MCL cluster results
+data/scored_clusters/**/*
+!data/scored_clusters/**/
+
 # Weighting results
 data/weighted/**/*
 !data/weighted/**/

@@ -17,14 +17,14 @@ from aliases import (
     TOPO,
     WEIGHT,
 )
-from assertions import assert_no_zero_weight
+from assertions import assert_df_bounded, assert_no_zero_weight
 from model_preprocessor import ModelPreprocessor
 from supervised_weighting import SupervisedWeighting
 from utils import construct_composite_network, get_cyc_train_test_comp_pairs
 
 
 class FeatureWeighting:
-    def __init__(self, dip: bool = False) -> None:
+    def __init__(self, dip: bool) -> None:
         self.prefix = "dip_" if dip else ""
 
     def main(
@@ -61,26 +61,19 @@ class FeatureWeighting:
 
 
 class Weighting:
-    def __init__(self):
+    def __init__(self, dip: bool):
         self.model_prep = ModelPreprocessor()
+        self.df_composite = construct_composite_network(dip=dip)
+        # self.df_composite = self.model_prep.normalize_features(df_composite, FEATURES)
+        self.dip = dip
 
-    def main(self, dip: bool = False):
-        prefix = "dip_" if dip else ""
-        df_composite = construct_composite_network(dip=dip)
-
-        # df_composite = self.model_prep.normalize_features(df_composite, FEATURES)
-
-        print()
-        print(f"========================================================")
-        print(
-            f"WEIGHTING: {'DIP COMPOSITE NETWORK' if dip else 'SWC COMPOSITE NETWORK'}"
-        )
-        print()
+    def main(self):
+        prefix = "dip_" if self.dip else ""
 
         print("---------------------------------------------------------")
         print("Writing unweighted network")
         df_unweighted = (
-            df_composite.filter(pl.col(TOPO) > 0)
+            self.df_composite.filter(pl.col(TOPO) > 0)
             .with_columns(pl.lit(1.0).alias(WEIGHT))
             .select([PROTEIN_U, PROTEIN_V, WEIGHT])
         )
@@ -92,20 +85,26 @@ class Weighting:
         print()
 
         print("------------- BEGIN: FEATURE WEIGHTING ----------------------")
-        feat_weighting = FeatureWeighting(dip=dip)
+        feat_weighting = FeatureWeighting(dip=self.dip)
         for f in FEATURES:
-            df_f_weighted = feat_weighting.main(df_composite, [f], f)
+            df_f_weighted = feat_weighting.main(self.df_composite, [f], f)
             print(f"Done feature weighting using: {f}")
-            print(df_f_weighted.describe())
-            # assert_df_bounded(df_f_weighted, [WEIGHT])
+            try:
+                assert_df_bounded(df_f_weighted, [WEIGHT])
+            except:
+                print("EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE")
+                print(df_f_weighted.filter(pl.col(WEIGHT) > 1))
+                return
+
         print("------------- END: FEATURE WEIGHTING ----------------------\n\n")
 
         print("------------- BEGIN: SUPER FEATURE WEIGHTING ----------------------")
         for f in SUPER_FEATS:
-            df_f_weighted = feat_weighting.main(df_composite, f["features"], f["name"])
+            df_f_weighted = feat_weighting.main(
+                self.df_composite, f["features"], f["name"]
+            )
             print(f"Done feature weighting using: {f['name']} - {f['features']}")
-            print(df_f_weighted.describe())
-            # assert_df_bounded(df_f_weighted, [WEIGHT])
+            assert_df_bounded(df_f_weighted, [WEIGHT])
         print("------------- END: SUPER FEATURE WEIGHTING ----------------------\n\n")
 
         print()
@@ -118,21 +117,27 @@ class Weighting:
         # Supervised co-complex probability weighting
         xgw_params = {
             "objective": "binary:logistic",
-            "n_estimators": 10000,
-            "alpha": 30,
+            "n_estimators": 1000,
             "max_depth": 3,
+            "lambda": 100,
             "subsample": 0.8,
             "colsample_bytree": 0.8,
             "n_jobs": -1,
-            "learning_rate": 0.005,
+            "learning_rate": 0.01,
+            "tree_method": "exact",
         }
-        xgw = SupervisedWeighting(XGBClassifier(**xgw_params), "XGW", dip=dip)
+        xgw = SupervisedWeighting(XGBClassifier(**xgw_params), "XGW", dip=self.dip)
 
         for xval_iter in range(n_iters):
             print(f"------------------- BEGIN: ITER {xval_iter} ---------------------")
             df_train_pairs, _ = get_cyc_train_test_comp_pairs(xval_iter)
             df_train_labeled = self.model_prep.label_composite(
-                df_composite, df_train_pairs, IS_CO_COMP, xval_iter, "subset", False
+                self.df_composite,
+                df_train_pairs,
+                IS_CO_COMP,
+                xval_iter,
+                "subset",
+                False,
             )
 
             # SWC cross-validation scores
@@ -143,7 +148,7 @@ class Weighting:
                     separator=" ",
                     has_header=False,
                 )
-                .join(df_composite, on=[PROTEIN_U, PROTEIN_V])
+                .join(self.df_composite, on=[PROTEIN_U, PROTEIN_V])
                 .select([PROTEIN_U, PROTEIN_V, WEIGHT])
             )
 
@@ -161,14 +166,15 @@ class Weighting:
             )
 
             # Write top 20k edges of SWC
-            df_w_swc.sort(pl.col(WEIGHT), descending=True).head(20_000).write_csv(
+            df_w_swc_20k = df_w_swc.sort(pl.col(WEIGHT), descending=True).head(20_000)
+            df_w_swc_20k.write_csv(
                 f"../data/weighted/20k_edges/cross_val/{prefix}swc_20k_iter{xval_iter}.csv",
                 has_header=False,
                 separator="\t",
             )
 
             # Weight the network using XGW
-            df_w_xgw = xgw.main(df_composite, df_train_labeled, xval_iter)
+            df_w_xgw = xgw.main(self.df_composite, df_train_labeled, xval_iter)
 
             print()
             print("XGW SCORES DESCRIPTION")
@@ -187,18 +193,19 @@ if __name__ == "__main__":
     pl.Config.set_tbl_rows(15)
 
     start = time.time()
-    weighting = Weighting()
 
     print(
-        "------------------------ Weighting the composite network --------------------"
+        "=======================  Weighting the composite network ==========================="
     )
-    weighting.main(dip=False)
+    weighting = Weighting(dip=False)
+    weighting.main()
     print()
 
     print(
-        "------------------------ Weighting the DIP composite network --------------------"
+        "======================= Weighting the DIP composite network ==========================="
     )
-    weighting.main(dip=True)
+    weighting = Weighting(dip=True)
+    weighting.main()
     print()
 
     print(f"Execution time: {time.time() - start}")

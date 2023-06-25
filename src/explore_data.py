@@ -35,8 +35,59 @@ class ExploratoryDataAnalysis:
     def __init__(self, features: List[str]):
         sns.set_palette("deep")
         self.features = features
-        self.df_composite = construct_composite_network(features=self.features)
+        self.df_composite = construct_composite_network(
+            features=self.features, dip=False
+        )
         self.model_prep = ModelPreprocessor()
+
+    def explore_l2_pairs(self):
+        """
+        High l2 scores
+
+
+        """
+
+    def explore_perfect_l2(self):
+        """
+        Perfect l2:
+        YBR009C,YNL030W
+        YBR010W,YNL031C
+        YBR118W,YPR080W
+        """
+
+        df_ppin = pl.read_csv(
+            "../data/preprocessed/dip_ppin.csv", new_columns=[PROTEIN_U, PROTEIN_V]
+        )
+
+        perfect_pairs = [
+            ("YBR009C", "YNL030W"),
+            ("YBR010W", "YNL031C"),
+            ("YBR118W", "YPR080W"),
+        ]
+
+        for p1, p2 in perfect_pairs:
+            srs1 = (
+                df_ppin.filter((pl.col(PROTEIN_U) == p1) | (pl.col(PROTEIN_V) == p1))
+                .select(
+                    pl.when(pl.col(PROTEIN_U) == p1)
+                    .then(pl.col(PROTEIN_V))
+                    .otherwise(pl.col(PROTEIN_U))
+                )
+                .to_series()
+                .sort()
+            )
+            srs2 = (
+                df_ppin.filter((pl.col(PROTEIN_U) == p2) | (pl.col(PROTEIN_V) == p2))
+                .select(
+                    pl.when(pl.col(PROTEIN_U) == p2)
+                    .then(pl.col(PROTEIN_V))
+                    .otherwise(pl.col(PROTEIN_U))
+                )
+                .to_series()
+                .sort()
+            )
+
+            print(srs1.series_equal(srs2))
 
     def num_co_comp_pairs(self):
         n_total_co_comp_pairs = 11_923
@@ -246,11 +297,11 @@ class ExploratoryDataAnalysis:
         print(df)
 
     def main(self):
-        print(self.df_composite.select(self.features).describe())
-        self.df_composite = self.model_prep.normalize_features(
-            self.df_composite, self.features
-        )
-        print(self.df_composite.select(self.features).describe())
+        # print(self.df_composite.select(self.features).describe())
+        # self.df_composite = self.model_prep.normalize_features(
+        #     self.df_composite, self.features
+        # )
+        # print(self.df_composite.select(self.features).describe())
 
         # self.num_co_comp_pairs()
         # self.features_heatmap()
@@ -261,7 +312,8 @@ class ExploratoryDataAnalysis:
         # self.nip_co_comp_intersection()
         # self.explore_co_comp_pairs()
         # plt.show()
-        self.explore_swc_features()
+        # self.explore_swc_features()
+        self.explore_perfect_l2()
 
 
 if __name__ == "__main__":

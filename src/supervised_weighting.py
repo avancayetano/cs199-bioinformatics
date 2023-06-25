@@ -44,7 +44,7 @@ class SupervisedWeighting:
     Supervised co-complex probability weighting method.
     """
 
-    def __init__(self, model: Model, name: str, dip: bool = False):
+    def __init__(self, model: Model, name: str, dip: bool):
         self.label = IS_CO_COMP
         self.model = model
         self.name = name

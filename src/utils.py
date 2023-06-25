@@ -37,7 +37,8 @@ def sort_prot_cols(prot_u: str, prot_v: str) -> List[pl.Expr]:
 
 
 def construct_composite_network(
-    features: Optional[List[str]] = None, dip: bool = False
+    dip: bool,
+    features: Optional[List[str]] = None,
 ) -> pl.DataFrame:
     """
     Constructs the composite protein network based on the selected features.
@@ -80,21 +81,35 @@ def construct_composite_network(
     return df_composite
 
 
-def get_clusters_list(path: str) -> List[Set[str]]:
-    clusters: List[Set[str]] = []
+def get_clusters_list(path: str, scored: bool = False) -> List[List[str]]:
+    """
+    Proteins are sorted in each subgraph.
+    """
+    if scored:
+        path = path.replace("clusters", "scored_clusters")
+
+    clus: List[Set[str]] = []
     with open(path) as file:
         lines = file.readlines()
         for line in lines:
-            proteins = set(line.split("\t"))
-            clusters.append(proteins)
+            line = line.strip()
+            proteins = set(line.split("\t"))  # to remove duplicates, if there is any
+            clus.append(proteins)
+
+    clusters: List[List[str]] = list(map(lambda c: sorted(c), clus))
 
     return clusters
 
 
 def get_complexes_list(
     xval_iter: Optional[int] = None, complex_type: Literal["train", "test"] = "test"
-) -> List[Set[str]]:
+) -> List[List[str]]:
+    """
+    Proteins are sorted in each subgraph.
+    """
+
     df_complexes = get_all_cyc_complexes()
+
     if xval_iter is None:
         cmps: List[List[str]] = df_complexes.select(COMP_PROTEINS).to_series().to_list()
 
@@ -110,7 +125,7 @@ def get_complexes_list(
             .to_list()
         )
 
-    complexes: List[Set[str]] = list(map(lambda cmp: set(cmp), cmps))
+    complexes: List[List[str]] = list(map(lambda c: sorted(set(c)), cmps))
     return complexes
 
 
@@ -129,8 +144,19 @@ def get_all_cyc_complexes() -> pl.DataFrame:
         .sort(pl.col(COMP_ID))
         .collect()
     )
-
+    # check if protein strings are stripped
+    # print(df_complexes)
+    # df = df_complexes.select(COMP_PROTEINS).select(
+    #     pl.col(COMP_PROTEINS)
+    #     .list.eval(pl.element().str.contains("\n").any())
+    #     .list.get(0)
+    # )
+    # print(df)
+    # print(df.select(pl.col(COMP_PROTEINS).any()))
     return df_complexes
+
+
+get_all_cyc_complexes()
 
 
 def get_unique_proteins(df: pl.DataFrame) -> pl.Series:
@@ -213,16 +239,16 @@ def get_cyc_comp_pairs(df_complex_ids: Optional[pl.DataFrame] = None):
     return df_comp_pairs
 
 
-def get_cyc_train_test_comp_pairs(iter: int) -> Tuple[pl.DataFrame, pl.DataFrame]:
+def get_cyc_train_test_comp_pairs(xval_iter: int) -> Tuple[pl.DataFrame, pl.DataFrame]:
     df_cross_val = pl.read_csv("../data/preprocessed/cross_val_table.csv")
 
-    df_train_ids = df_cross_val.filter(pl.col(f"{XVAL_ITER}_{iter}") == "train").select(
-        COMP_ID
-    )
+    df_train_ids = df_cross_val.filter(
+        pl.col(f"{XVAL_ITER}_{xval_iter}") == "train"
+    ).select(COMP_ID)
 
-    df_test_ids = df_cross_val.filter(pl.col(f"{XVAL_ITER}_{iter}") == "test").select(
-        COMP_ID
-    )
+    df_test_ids = df_cross_val.filter(
+        pl.col(f"{XVAL_ITER}_{xval_iter}") == "test"
+    ).select(COMP_ID)
 
     print(
         f"Train complexes: {df_train_ids.shape[0]} | Test complexes: {df_test_ids.shape[0]}"
@@ -234,22 +260,33 @@ def get_cyc_train_test_comp_pairs(iter: int) -> Tuple[pl.DataFrame, pl.DataFrame
     return df_train, df_test
 
 
-def get_cluster_filename(
-    n_edges: str, method: str, supervised: bool, inflation: int, iter: str = ""
+def get_clusters_filename(
+    n_edges: str,
+    method: str,
+    supervised: bool,
+    inflation: int,
+    dip: bool,
+    xval_iter: int = -1,
 ):
+    prefix = "dip_" if dip else ""
     if method == "unweighted":
-        return f"../data/clusters/out.{method}.csv.I{inflation}0"
+        return f"../data/clusters/out.{prefix}{method}.csv.I{inflation}0"
 
     suffix = "_20k" if n_edges == "20k_edges" else ""
     if supervised:
-        return f"../data/clusters/{n_edges}/cross_val/out.{method}{suffix}{iter}.csv.I{inflation}0"
-    return f"../data/clusters/{n_edges}/features/out.{method}{suffix}.csv.I{inflation}0"
+        return f"../data/clusters/{n_edges}/cross_val/out.{prefix}{method}{suffix}_iter{xval_iter}.csv.I{inflation}0"
+    return f"../data/clusters/{n_edges}/features/out.{prefix}{method}{suffix}.csv.I{inflation}0"
 
 
-def get_weighted_filename(method: str, supervised: bool, iter: str = ""):
+def get_weighted_filename(
+    method: str, supervised: bool, dip: bool, xval_iter: int = -1
+):
+    prefix = "dip_" if dip else ""
     if method == "unweighted":
-        return f"../data/weighted/{method}.csv"
+        return f"../data/weighted/{prefix}{method}.csv"
 
     if supervised:
-        return f"../data/weighted/all_edges/cross_val/{method}{iter}.csv"
-    return f"../data/weighted/all_edges/features/{method}.csv"
+        return (
+            f"../data/weighted/all_edges/cross_val/{prefix}{method}_iter{xval_iter}.csv"
+        )
+    return f"../data/weighted/all_edges/features/{prefix}{method}.csv"
