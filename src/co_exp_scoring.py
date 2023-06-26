@@ -193,8 +193,8 @@ class CoExpScoring:
             pl.Expr: Removes protein pairs with negative gene expression correlation.
         """
         return (
-            pl.when(pl.col(SCORE) < 0)
-            .then(pl.lit(0))
+            pl.when(pl.col(SCORE) < 0.0)
+            .then(pl.lit(0.0))
             .otherwise(pl.col(SCORE))
             .alias(SCORE)
         )

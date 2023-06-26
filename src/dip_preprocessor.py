@@ -347,7 +347,27 @@ if __name__ == "__main__":
     print("-------------------------------------------")
 
     topo_scoring = TopoScoring(n_batches=1)
-    df_w_ppin = topo_scoring.main(df_ppin, 2)
+    # due to rounding errors, need to bound the scores...
+    df_w_ppin = topo_scoring.main(df_ppin, 2).select(
+        [
+            PROTEIN_U,
+            PROTEIN_V,
+            pl.when(pl.col(TOPO) > 1.0)
+            .then(pl.lit(1.0))
+            .otherwise(
+                pl.when(pl.col(TOPO) < 0.0).then(pl.lit(0.0)).otherwise(pl.col(TOPO))
+            )
+            .alias(TOPO),
+            pl.when(pl.col(TOPO_L2) > 1.0)
+            .then(pl.lit(1.0))
+            .otherwise(
+                pl.when(pl.col(TOPO_L2) < 0.0)
+                .then(pl.lit(0.0))
+                .otherwise(pl.col(TOPO_L2))
+            )
+            .alias(TOPO_L2),
+        ]
+    )
 
     print()
     print(f">>> [{TOPO} and {TOPO_L2}] Scored PPIN")

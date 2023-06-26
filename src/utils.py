@@ -81,7 +81,27 @@ def construct_composite_network(
     return df_composite
 
 
-def get_clusters_list(path: str, scored: bool = False) -> List[List[str]]:
+# def get_clusters_list(path: str, scored: bool = False) -> List[List[str]]:
+#     """
+#     Proteins are sorted in each subgraph.
+#     """
+#     if scored:
+#         path = path.replace("clusters", "scored_clusters")
+
+#     clus: List[Set[str]] = []
+#     with open(path) as file:
+#         lines = file.readlines()
+#         for line in lines:
+#             line = line.strip()
+#             proteins = set(line.split("\t"))  # to remove duplicates, if there is any
+#             clus.append(proteins)
+
+#     clusters: List[List[str]] = list(map(lambda c: sorted(c), clus))
+
+#     return clusters
+
+
+def get_clusters_list(path: str, scored: bool = False) -> List[Set[str]]:
     """
     Proteins are sorted in each subgraph.
     """
@@ -96,14 +116,14 @@ def get_clusters_list(path: str, scored: bool = False) -> List[List[str]]:
             proteins = set(line.split("\t"))  # to remove duplicates, if there is any
             clus.append(proteins)
 
-    clusters: List[List[str]] = list(map(lambda c: sorted(c), clus))
+    clusters: List[Set[str]] = list(map(lambda c: set(c), clus))
 
     return clusters
 
 
 def get_complexes_list(
     xval_iter: Optional[int] = None, complex_type: Literal["train", "test"] = "test"
-) -> List[List[str]]:
+) -> List[Set[str]]:
     """
     Proteins are sorted in each subgraph.
     """
@@ -125,7 +145,7 @@ def get_complexes_list(
             .to_list()
         )
 
-    complexes: List[List[str]] = list(map(lambda c: sorted(set(c)), cmps))
+    complexes: List[Set[str]] = list(map(lambda c: set(c), cmps))
     return complexes
 
 
@@ -267,21 +287,25 @@ def get_clusters_filename(
     inflation: int,
     dip: bool,
     xval_iter: int = -1,
+    scored: bool = False,
 ):
     prefix = "dip_" if dip else ""
+    method = method.lower()
+    clusters = "scored_clusters" if scored else "clusters"
     if method == "unweighted":
-        return f"../data/clusters/out.{prefix}{method}.csv.I{inflation}0"
+        return f"../data/{clusters}/out.{prefix}{method}.csv.I{inflation}0"
 
     suffix = "_20k" if n_edges == "20k_edges" else ""
     if supervised:
-        return f"../data/clusters/{n_edges}/cross_val/out.{prefix}{method}{suffix}_iter{xval_iter}.csv.I{inflation}0"
-    return f"../data/clusters/{n_edges}/features/out.{prefix}{method}{suffix}.csv.I{inflation}0"
+        return f"../data/{clusters}/{n_edges}/cross_val/out.{prefix}{method}{suffix}_iter{xval_iter}.csv.I{inflation}0"
+    return f"../data/{clusters}/{n_edges}/features/out.{prefix}{method}{suffix}.csv.I{inflation}0"
 
 
 def get_weighted_filename(
     method: str, supervised: bool, dip: bool, xval_iter: int = -1
 ):
     prefix = "dip_" if dip else ""
+    method = method.lower()
     if method == "unweighted":
         return f"../data/weighted/{prefix}{method}.csv"
 

@@ -36,8 +36,7 @@ class CompEdgesEvaluator:
     def __init__(self, dip: bool):
         self.sv_methods = ["SWC", "XGW"]
         self.feat_methods = FEATURES + [method["name"] for method in SUPER_FEATS]
-        self.methods = self.sv_methods + self.feat_methods
-        self.methods = self.sv_methods
+        self.methods = self.sv_methods + self.feat_methods + ["unweighted"]
         self.n_iters = 10
 
         self.dip = dip

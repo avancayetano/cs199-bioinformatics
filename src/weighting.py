@@ -64,7 +64,8 @@ class Weighting:
     def __init__(self, dip: bool):
         self.model_prep = ModelPreprocessor()
         self.df_composite = construct_composite_network(dip=dip)
-        # self.df_composite = self.model_prep.normalize_features(df_composite, FEATURES)
+        assert_df_bounded(self.df_composite, FEATURES)
+        print("All scores bounded!")
         self.dip = dip
 
     def main(self):
@@ -89,12 +90,7 @@ class Weighting:
         for f in FEATURES:
             df_f_weighted = feat_weighting.main(self.df_composite, [f], f)
             print(f"Done feature weighting using: {f}")
-            try:
-                assert_df_bounded(df_f_weighted, [WEIGHT])
-            except:
-                print("EEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE")
-                print(df_f_weighted.filter(pl.col(WEIGHT) > 1))
-                return
+            assert_df_bounded(df_f_weighted, [WEIGHT])
 
         print("------------- END: FEATURE WEIGHTING ----------------------\n\n")
 
@@ -152,6 +148,8 @@ class Weighting:
                 .select([PROTEIN_U, PROTEIN_V, WEIGHT])
             )
 
+            assert_df_bounded(df_w_swc, [WEIGHT])
+
             print()
             print("SWC SCORES DESCRIPTION")
             print(df_w_swc.describe())
@@ -176,6 +174,8 @@ class Weighting:
             # Weight the network using XGW
             df_w_xgw = xgw.main(self.df_composite, df_train_labeled, xval_iter)
 
+            assert_df_bounded(df_w_xgw, [WEIGHT])
+
             print()
             print("XGW SCORES DESCRIPTION")
             print(df_w_xgw.describe())
@@ -191,7 +191,7 @@ class Weighting:
 
 if __name__ == "__main__":
     pl.Config.set_tbl_rows(15)
-
+    pl.Config.set_tbl_cols(15)
     start = time.time()
 
     print(
