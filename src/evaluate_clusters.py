@@ -429,7 +429,7 @@ class ClustersEvaluator:
 
     def prec_recall_curves(self):
         """
-        Four precision-recall curves (average of all inflation settings)
+        Four precision-recall curves PER INFLATION SETTINGS!
         - all_edges, match_thresh = 0.5
         - all_edges, match_thresh = 0.75
         - 20k_edges, match_thresh = 0.5
@@ -461,7 +461,7 @@ class ClustersEvaluator:
         )
         print(df_auc_summary.sort(AVG_AUC, descending=True))
 
-        n_methods = 7
+        n_methods = 6
         df_top_methods = (
             df_auc_summary.sort(AVG_AUC, descending=True).select(METHOD).head(n_methods)
         )
@@ -503,7 +503,7 @@ class ClustersEvaluator:
             .filter(
                 (pl.col(N_EDGES) == n_edges)
                 & (pl.col(MATCH_THRESH) == match_thresh)
-                & (pl.col(INFLATION) == 4)
+                & (pl.col(INFLATION) == 3)
             )
             .groupby([INFLATION, METHOD, DENS_THRESH])
             .mean()
@@ -573,25 +573,25 @@ if __name__ == "__main__":
         dip=False,
     )
     cluster_eval.main(re_eval=False)
-    # print("==============================================================")
-    # print()
+    print("==============================================================")
+    print()
 
-    # print()
-    # print(
-    #     "==================== CLUSTER EVALUATION ON DIP COMPOSITE NETWORK =================="
-    # )
-    # cluster_eval = ClustersEvaluator(
-    #     inflations=inflations,
-    #     edges=edges,
-    #     feat_methods=feat_methods,
-    #     sv_methods=sv_methods,
-    #     n_dens=n_dens,
-    #     n_iters=n_iters,
-    #     dip=True,
-    # )
-    # cluster_eval.main(re_eval=True)
-    # print("==============================================================")
-    # print()
+    print()
+    print(
+        "==================== CLUSTER EVALUATION ON DIP COMPOSITE NETWORK =================="
+    )
+    cluster_eval = ClustersEvaluator(
+        inflations=inflations,
+        edges=edges,
+        feat_methods=feat_methods,
+        sv_methods=sv_methods,
+        n_dens=n_dens,
+        n_iters=n_iters,
+        dip=True,
+    )
+    cluster_eval.main(re_eval=False)
+    print("==============================================================")
+    print()
 
     plt.show()
 
