@@ -5,7 +5,13 @@ from typing import List, TypedDict
 import matplotlib.pyplot as plt
 import polars as pl
 import seaborn as sns
-from sklearn.metrics import auc, brier_score_loss, log_loss, precision_recall_curve
+from sklearn.metrics import (
+    PrecisionRecallDisplay,
+    auc,
+    brier_score_loss,
+    log_loss,
+    precision_recall_curve,
+)
 
 from aliases import (
     BRIER_SCORE,
@@ -14,12 +20,14 @@ from aliases import (
     IS_CO_COMP,
     LOG_LOSS,
     METHOD,
+    METRIC,
     PR_AUC,
     PRECISION,
     PROTEIN_U,
     PROTEIN_V,
     RECALL,
     SUPER_FEATS,
+    VALUE,
     WEIGHT,
     XVAL_ITER,
 )
@@ -48,12 +56,16 @@ class CompEdgesEvaluator:
             df_composite, comp_pairs, IS_CO_COMP, -1, "all", False
         )
 
+        sns.set_palette("deep")
+
     def main(self, re_eval: bool = True):
         prefix = "dip_" if self.dip else ""
+
         if re_eval:
             evals = []
             print(f"Evaluating on these ({len(self.methods)}) methods: {self.methods}")
             print()
+            df_prec_recall = pl.DataFrame()
             for xval_iter in range(self.n_iters):
                 print(f"Evaluating cross-val iteration: {xval_iter}")
                 df_train_pairs, _ = get_cyc_train_test_comp_pairs(xval_iter)
@@ -88,6 +100,20 @@ class CompEdgesEvaluator:
                     precision, recall, thresholds = precision_recall_curve(
                         y_true, y_pred, pos_label=1
                     )
+                    if xval_iter == 0:
+                        df_pr = (
+                            pl.from_numpy(precision, schema=[PRECISION])
+                            .hstack(pl.from_numpy(recall, schema=[RECALL]))
+                            .with_columns(
+                                [
+                                    pl.lit(method).alias(METHOD),
+                                    pl.lit(xval_iter).alias(XVAL_ITER),
+                                ]
+                            )
+                        )
+                        df_prec_recall = pl.concat(
+                            [df_prec_recall, df_pr], how="vertical"
+                        )
                     pr_auc = auc(recall, precision)
 
                     evals.append(
@@ -114,10 +140,92 @@ class CompEdgesEvaluator:
             print(df_evals)
 
             df_evals.write_csv(f"../data/evals/{prefix}comp_evals.csv", has_header=True)
+            df_prec_recall.write_csv(
+                f"../data/evals/{prefix}prec_recall_comp_evals.csv", has_header=True
+            )
+            print(df_prec_recall)
 
         # plots
+        network = "DIP COMPOSITE NETWORK" if self.dip else "ORIGINAL COMPOSITE NETWORK"
+        n_methods = 10
         df_evals = pl.read_csv(f"../data/evals/{prefix}comp_evals.csv", has_header=True)
+        df_prec_recall = pl.read_csv(
+            f"../data/evals/{prefix}prec_recall_comp_evals.csv", has_header=True
+        )
+
+        df_loss = (
+            df_evals.head(n_methods)
+            .select([METHOD, LOG_LOSS, BRIER_SCORE])
+            .melt(id_vars=METHOD, variable_name=METRIC, value_name=VALUE)
+        )
+
         print(df_evals)
+
+        plt.figure()
+        ax = sns.barplot(data=df_loss.to_pandas(), x=METHOD, y=VALUE, hue=METRIC)
+        ax.set_title(
+            f"{network}\nClassification of co-complex edges\nTop {n_methods} weighting methods in terms of log loss and Brier score loss."
+        )
+        plt.xticks(rotation=15)
+
+        df_auc = (
+            df_evals.sort(PR_AUC, descending=True)
+            .head(n_methods)
+            .select([METHOD, PR_AUC])
+            .melt(id_vars=METHOD, variable_name=METRIC, value_name=VALUE)
+        )
+        plt.figure()
+        ax = sns.barplot(data=df_auc.to_pandas(), x=METHOD, y=VALUE, hue=METRIC)
+        ax.set_title(
+            f"{network}\nClassification of co-complex edges\nTop {n_methods} weighting methods in terms of Precision-Recall AUC."
+        )
+        plt.xticks(rotation=15)
+
+        ###################
+        plt.figure()
+        ax = sns.barplot(
+            data=df_loss.filter(
+                (pl.col(METHOD) == "XGW") | (pl.col(METHOD) == "SWC")
+            ).to_pandas(),
+            x=METHOD,
+            y=VALUE,
+            hue=METRIC,
+        )
+        ax.set_title(
+            f"{network}\nClassification of co-complex edges\nXGW vs SWC in terms of log loss and Brier score loss."
+        )
+        plt.xticks(rotation=15)
+
+        df_auc = (
+            df_evals.sort(PR_AUC, descending=True)
+            .head(n_methods)
+            .select([METHOD, PR_AUC])
+            .melt(id_vars=METHOD, variable_name=METRIC, value_name=VALUE)
+        )
+        plt.figure()
+        ax = sns.barplot(
+            data=df_auc.filter(
+                (pl.col(METHOD) == "XGW") | (pl.col(METHOD) == "SWC")
+            ).to_pandas(),
+            x=METHOD,
+            y=VALUE,
+            hue=METRIC,
+        )
+        ax.set_title(
+            f"{network}\nClassification of co-complex edges\nXGW vs SWC in terms of Precision-Recall AUC."
+        )
+        plt.xticks(rotation=15)
+
+        # plt.figure()
+        # df_display = df_prec_recall.join(df_auc, on=METHOD, how="inner")
+        # sns.lineplot(
+        #     data=df_display,
+        #     x=RECALL,
+        #     y=PRECISION,
+        #     hue=METHOD,
+        #     errorbar=None,
+        # )
+        # plt.title(f"Precision-Recall curve on")
 
 
 if __name__ == "__main__":
@@ -137,3 +245,5 @@ if __name__ == "__main__":
     evaluator = CompEdgesEvaluator(dip=True)
     evaluator.main(re_eval=False)
     print()
+
+    plt.show()

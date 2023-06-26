@@ -13,8 +13,10 @@ DENSITY = "DENSITY"
 XVAL_ITER = "ITER"  # for cross-validation iterations
 METHOD = "METHOD"
 SCENARIO = "SCENARIO"
+VALUE = "VALUE"
 
 # Metrics
+METRIC = "METRIC"
 PRECISION = "PRECISION"
 RECALL = "RECALL"
 PR_AUC = "PR_AUC"

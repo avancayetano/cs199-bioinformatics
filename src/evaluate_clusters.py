@@ -100,6 +100,7 @@ class ClustersEvaluator:
             * 2
         )
         self.dip = dip
+        sns.set_palette("deep")
 
     def cluster_density(self, df_w: pl.DataFrame, cluster: Set[str]) -> float:
         if len(cluster) <= 1:
@@ -437,47 +438,110 @@ class ClustersEvaluator:
         """
         prefix = "dip_" if self.dip else ""
         df_cluster_evals = pl.read_csv(f"../data/evals/{prefix}cluster_evals.csv")
-
-        df_all_050 = self.get_prec_recall_curve(df_cluster_evals, "all_edges", 0.5)
-        df_all_075 = self.get_prec_recall_curve(df_cluster_evals, "all_edges", 0.75)
-        df_20k_050 = self.get_prec_recall_curve(df_cluster_evals, "20k_edges", 0.5)
-        df_20k_075 = self.get_prec_recall_curve(df_cluster_evals, "20k_edges", 0.75)
-
-        df_all_050_auc = self.get_prec_recall_auc(df_all_050, "all_050")
-        df_all_075_auc = self.get_prec_recall_auc(df_all_075, "all_075")
-        df_20k_050_auc = self.get_prec_recall_auc(df_20k_050, "20k_050")
-        df_20k_075_auc = self.get_prec_recall_auc(df_20k_075, "20k_075")
-
-        # Print AUC summary of the four scenarios
-        df_auc_summary = (
-            pl.concat(
-                [df_all_050_auc, df_all_075_auc, df_20k_050_auc, df_20k_075_auc],
-                how="vertical",
+        df_evals = pl.DataFrame()
+        for inflation in self.inflations:
+            df_all_050 = self.get_prec_recall_curve(
+                df_cluster_evals, "all_edges", 0.5, inflation
             )
-            .pivot(
-                values=AUC, index=METHOD, columns=SCENARIO, aggregate_function="first"
+            df_all_075 = self.get_prec_recall_curve(
+                df_cluster_evals, "all_edges", 0.75, inflation
             )
-            .with_columns((pl.sum(pl.all().exclude(METHOD)) / 4).alias(AVG_AUC))
-        )
-        print(df_auc_summary.sort(AVG_AUC, descending=True))
+            df_20k_050 = self.get_prec_recall_curve(
+                df_cluster_evals, "20k_edges", 0.5, inflation
+            )
+            df_20k_075 = self.get_prec_recall_curve(
+                df_cluster_evals, "20k_edges", 0.75, inflation
+            )
 
-        n_methods = 6
-        df_top_methods = (
-            df_auc_summary.sort(AVG_AUC, descending=True).select(METHOD).head(n_methods)
+            df_all_050_auc = self.get_prec_recall_auc(df_all_050, "all_050")
+            df_all_075_auc = self.get_prec_recall_auc(df_all_075, "all_075")
+            df_20k_050_auc = self.get_prec_recall_auc(df_20k_050, "20k_050")
+            df_20k_075_auc = self.get_prec_recall_auc(df_20k_075, "20k_075")
+
+            # Print AUC summary of the four scenarios
+            df_auc_summary = (
+                pl.concat(
+                    [
+                        df_20k_050_auc,
+                        df_all_050_auc,
+                        df_20k_075_auc,
+                        df_all_075_auc,
+                    ],
+                    how="vertical",
+                )
+                .pivot(
+                    values=AUC,
+                    index=METHOD,
+                    columns=SCENARIO,
+                    aggregate_function="first",
+                )
+                .with_columns(
+                    [
+                        (pl.sum(pl.all().exclude(METHOD)) / 4).alias(AVG_AUC),
+                        pl.lit(inflation).alias(INFLATION),
+                    ]
+                )
+            )
+            df_evals = pl.concat([df_evals, df_auc_summary], how="vertical")
+
+            # n_methods = 6
+            # df_top_methods = (
+            #     df_auc_summary.sort(AVG_AUC, descending=True)
+            #     .select(METHOD)
+            #     .head(n_methods)
+            # )
+        n_methods = 8
+        df_evals_summary = (
+            df_evals.groupby(METHOD)
+            .mean()
+            .sort(AVG_AUC, descending=True)
+            .head(n_methods)
+            .select(pl.exclude([AVG_AUC, INFLATION]))
+            .melt(
+                id_vars=METHOD,
+                variable_name=SCENARIO,
+                value_name=AUC,
+            )
         )
-        # Plot the four curves
-        self.plot_prec_recall_curve(
-            df_all_050, df_top_methods, f"all edges, match_thresh=0.5"
+        print(df_evals.groupby(METHOD).mean().sort(AVG_AUC, descending=True))
+        plt.figure()
+        ax = sns.barplot(
+            data=df_evals_summary.to_pandas(), x=METHOD, y=AUC, hue=SCENARIO
         )
-        self.plot_prec_recall_curve(
-            df_all_075, df_top_methods, f"all edges, match_thresh=0.75"
+        network = "DIP COMPOSITE NETWORK" if self.dip else "ORIGINAL COMPOSITE NETWORK"
+        ax.set_title(
+            f"{network}\nProtein Complex Detection\nTop {n_methods} weighting methods in terms of Precision-Recall AUC"
         )
-        self.plot_prec_recall_curve(
-            df_20k_050, df_top_methods, f"20k edges, match_thresh=0.5"
+        plt.xticks(rotation=15)
+
+        plt.figure()
+        ax = sns.barplot(
+            data=df_evals_summary.filter(
+                (pl.col(METHOD) == "XGW") | (pl.col(METHOD) == "SWC")
+            ).to_pandas(),
+            x=METHOD,
+            y=AUC,
+            hue=SCENARIO,
         )
-        self.plot_prec_recall_curve(
-            df_20k_075, df_top_methods, f"20k edges, match_thresh=0.75"
+        network = "DIP COMPOSITE NETWORK" if self.dip else "ORIGINAL COMPOSITE NETWORK"
+        ax.set_title(
+            f"{network}\nProtein Complex Detection\nXGW vs SWC in terms of Precision-Recall AUC"
         )
+        plt.xticks(rotation=15)
+
+        # # Plot the four curves
+        # self.plot_prec_recall_curve(
+        #     df_all_050, df_top_methods, f"all edges, match_thresh=0.5"
+        # )
+        # self.plot_prec_recall_curve(
+        #     df_all_075, df_top_methods, f"all edges, match_thresh=0.75"
+        # )
+        # self.plot_prec_recall_curve(
+        #     df_20k_050, df_top_methods, f"20k edges, match_thresh=0.5"
+        # )
+        # self.plot_prec_recall_curve(
+        #     df_20k_075, df_top_methods, f"20k edges, match_thresh=0.75"
+        # )
 
     def plot_prec_recall_curve(
         self, df: pl.DataFrame, df_top_methods: pl.DataFrame, scenario: str
@@ -496,14 +560,18 @@ class ClustersEvaluator:
         plt.title(f"Precision-Recall curve on {scenario}")
 
     def get_prec_recall_curve(
-        self, df_cluster_evals: pl.DataFrame, n_edges: str, match_thresh: float
+        self,
+        df_cluster_evals: pl.DataFrame,
+        n_edges: str,
+        match_thresh: float,
+        inflation: int,
     ) -> pl.DataFrame:
         df_prec_recall = (
             df_cluster_evals.lazy()
             .filter(
                 (pl.col(N_EDGES) == n_edges)
                 & (pl.col(MATCH_THRESH) == match_thresh)
-                & (pl.col(INFLATION) == 3)
+                & (pl.col(INFLATION) == inflation)
             )
             .groupby([INFLATION, METHOD, DENS_THRESH])
             .mean()
