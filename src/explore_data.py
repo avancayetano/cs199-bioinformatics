@@ -7,6 +7,7 @@ import seaborn as sns
 
 from aliases import (
     CO_OCCUR,
+    COMP_ID,
     FEATURES,
     IS_CO_COMP,
     IS_NIP,
@@ -17,14 +18,23 @@ from aliases import (
     SWC_FEATS,
     TOPO,
     TOPO_L2,
+    XVAL_ITER,
 )
 from model_preprocessor import ModelPreprocessor
-from utils import construct_composite_network, get_cyc_comp_pairs, get_unique_proteins
+from utils import (
+    construct_composite_network,
+    get_all_cyc_complexes,
+    get_clusters_list,
+    get_complexes_list,
+    get_cyc_comp_pairs,
+    get_unique_proteins,
+)
 
 
 class ExploratoryDataAnalysis:
     """
-    Exploratory Data Analysis.
+    Exploratory Data Analysis and some scratch/explorations I did.
+    This is undocumented, but there is no need to read this.
 
     - [X] Heatmap of features correlation
     - [X] Distribution of each feature
@@ -38,7 +48,64 @@ class ExploratoryDataAnalysis:
         self.df_composite = construct_composite_network(
             features=self.features, dip=False
         )
+        self.df_dip_composite = construct_composite_network(
+            features=self.features, dip=True
+        )
+        self.cyc_comp_pairs = get_cyc_comp_pairs()
         self.model_prep = ModelPreprocessor()
+
+    def check_cross_val(self):
+        df_cross_val = pl.read_csv("../data/preprocessed/cross_val_table.csv")
+        df_dip_cross_val = pl.read_csv("../data/preprocessed/dip_cross_val_table.csv")
+
+        df = pl.DataFrame()
+        df_dip = pl.DataFrame()
+
+        for xval_iter in range(10):
+            test_complexes = get_complexes_list(xval_iter, "test", False)
+            for cmp in test_complexes:
+                if len(cmp) <= 3:
+                    assert "ERROR"
+            dip_test_complexes = get_complexes_list(xval_iter, "test", True)
+            for cmp in dip_test_complexes:
+                if len(cmp) <= 3:
+                    assert "ERROR"
+
+            # check if all test complexes are covered
+            df_complex_ids = df_cross_val.filter(
+                pl.col(f"{XVAL_ITER}_{xval_iter}") == "test"
+            ).select(COMP_ID)
+
+            df_dip_complex_ids = df_dip_cross_val.filter(
+                pl.col(f"{XVAL_ITER}_{xval_iter}") == "test"
+            ).select(COMP_ID)
+            print(df_complex_ids.shape[0])
+            print(df_dip_complex_ids.shape[0])
+            df = pl.concat([df, df_complex_ids])
+            df_dip = pl.concat([df_dip, df_dip_complex_ids])
+
+        df = df.groupby(pl.col(COMP_ID)).count()
+        df_dip = df_dip.groupby(pl.col(COMP_ID)).count()
+
+        print(df.filter(pl.col("count") != 9))
+        print(df_dip.filter(pl.col("count") != 9))
+        print("Correct!!!")
+
+    def explore_absent_cocomp_edges(self):
+        print(self.cyc_comp_pairs.shape[0])
+        print(
+            self.df_composite.join(
+                self.cyc_comp_pairs, on=[PROTEIN_U, PROTEIN_V], how="inner"
+            ).shape[0]
+        )
+        print(
+            self.df_dip_composite.join(
+                self.cyc_comp_pairs, on=[PROTEIN_U, PROTEIN_V], how="inner"
+            ).shape[0]
+        )
+
+    def explore_complexes_clusters(self):
+        pass
 
     def explore_l2_pairs(self):
         """
@@ -297,7 +364,7 @@ class ExploratoryDataAnalysis:
         print(df)
 
     def main(self):
-        # print(self.df_composite.select(self.features).describe())
+        print(self.df_composite)
         # self.df_composite = self.model_prep.normalize_features(
         #     self.df_composite, self.features
         # )
@@ -313,7 +380,10 @@ class ExploratoryDataAnalysis:
         # self.explore_co_comp_pairs()
         # plt.show()
         # self.explore_swc_features()
-        self.explore_perfect_l2()
+        # self.explore_perfect_l2()
+        # self.explore_absent_cocomp_edges()
+        self.check_cross_val()
+        plt.show()
 
 
 if __name__ == "__main__":

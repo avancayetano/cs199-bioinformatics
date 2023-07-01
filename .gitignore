@@ -187,3 +187,5 @@ data/weighted/**/*
 typings/
 
 !README.md
+
+*_env/

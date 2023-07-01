@@ -4,7 +4,6 @@ import os
 from typing import Dict, List, Literal, Tuple, Union
 
 import polars as pl
-from imodels.discretization.mdlp import MDLPDiscretizer
 from sklearn.preprocessing import MinMaxScaler
 
 from aliases import PROTEIN_U, PROTEIN_V
@@ -17,13 +16,23 @@ class ModelPreprocessor:
     Collection of preprocessing methods for the machine learning models.
 
     - [X] Normalizing features
-    - [X] Discretizing features
     - [X] Labeling composite network
     """
 
     def normalize_features(
         self, df_composite: pl.DataFrame, features: List[str]
     ) -> pl.DataFrame:
+        """
+        Normalizes features. NOTE: Not used in this study.
+
+        Args:
+            df_composite (pl.DataFrame): Composite network.
+            features (List[str]): Features to normalize.
+
+        Returns:
+            pl.DataFrame: Normalized composite network.
+        """
+
         scaler = MinMaxScaler()
 
         df_pd_composite = df_composite.to_pandas()
@@ -38,110 +47,6 @@ class ModelPreprocessor:
 
         return df_composite
 
-    def learn_discretization(
-        self,
-        df_composite: pl.DataFrame,
-        df_labeled: pl.DataFrame,
-        features: List[str],
-        label: str,
-        xval_iter: int,
-    ):
-        """
-        NOTE: legacy code. Not used at all. Originally intended for Naive-Bayes models.
-        """
-        df_feat_label = df_labeled.join(
-            df_composite, on=[PROTEIN_U, PROTEIN_V], how="left"
-        )
-        MDLPDiscretizer(
-            df_feat_label.to_pandas(),
-            class_label=label,
-            features=features,
-            out_path_data=f"../data/training/discretized_data_iter{xval_iter}.csv",
-            out_path_bins=f"../data/training/discretized_bins_iter{xval_iter}.csv",
-        )
-
-    def discretize_composite(
-        self,
-        df_composite: pl.DataFrame,
-        df_labeled: pl.DataFrame,
-        features: List[str],
-        label: str,
-        xval_iter: int,
-    ) -> pl.DataFrame:
-        """
-        NOTE: legacy code. Not used at all. Originally intended for Naive-Bayes models.
-        """
-        print()
-        print("Discretizing the features (only for models that need discrete values)")
-        if not os.path.exists(f"../data/training/discretized_bins_iter{xval_iter}.csv"):
-            self.learn_discretization(
-                df_composite, df_labeled, features, label, xval_iter
-            )
-        else:
-            print(
-                f"Using discretized data from data/training/discretized_bins_iter{xval_iter}.csv"
-            )
-        cuts, selected_feats = self.get_cuts(xval_iter)
-
-        df_composite_binned = df_composite.select(
-            [PROTEIN_U, PROTEIN_V, *selected_feats]
-        )
-        for f in selected_feats:
-            cut_labels = ["0"] + [str(int(idx + 1)) for idx, _ in enumerate(cuts[f])]
-
-            df_cut = (
-                df_composite.select(pl.col(f))
-                .to_series()
-                .unique()
-                .cut(cuts[f], labels=cut_labels)
-                .select(
-                    [pl.col(f), pl.col("category").cast(pl.UInt64).alias(f"{f}_BINNED")]
-                )
-            )
-
-            df_composite_binned = df_composite_binned.join(df_cut, on=f, how="left")
-
-        df_composite_binned = df_composite_binned.select(
-            pl.exclude(selected_feats)
-        ).rename({f"{f}_BINNED": f for f in selected_feats})
-
-        removed_feats = list(filter(lambda f: f not in selected_feats, features))
-        print(f"MDLP Discretization done! Removed features: {removed_feats}")
-        print()
-
-        df_composite_binned = self.normalize_features(
-            df_composite_binned, selected_feats
-        )
-        assert_df_bounded(df_composite_binned, selected_feats)
-
-        return df_composite_binned
-
-    def get_cuts(self, xval_iter: int) -> Tuple[Dict[str, List[float]], List[str]]:
-        """
-        NOTE: legacy code. Not used at all. Originally intended for Naive-Bayes models.
-        """
-        bins: Dict[str, List[float]] = {}
-        feature = ""
-        selected_feats: List[str] = []
-        with open(f"../data/training/discretized_bins_iter{xval_iter}.csv") as file:
-            lines = file.readlines()[1:]
-            for line in lines:
-                line = line.strip()
-                if line.startswith("attr: "):
-                    feature = line.replace("attr: ", "")
-                    continue
-                elif line.startswith("-inf"):
-                    cuts = [
-                        float(interval.split("_to_")[1])
-                        for interval in line.split(", ")
-                    ][:-1]
-                    selected_feats.append(feature)
-                    bins[feature] = cuts
-                elif line.startswith("All"):
-                    bins[feature] = []
-
-        return bins, selected_feats
-
     def label_composite(
         self,
         df_composite: pl.DataFrame,
@@ -153,24 +58,24 @@ class ModelPreprocessor:
     ) -> pl.DataFrame:
         """
         Labels the composite network. The output dataframe has the following
-        columns: [PROTEIN_U, PROTEIN_V, LABEL]
+        columns: [PROTEIN_U, PROTEIN_V, LABEL].
 
         Args:
-            df_composite (pl.DataFrame): _description_
-            df_positive_pairs (pl.DataFrame): _description_
-            seed (int): _description_. Defaults to 0.
-            mode (Union[Literal['all'], Literal['subset']]): Defaults to "subset".
-                all: from the entire network, label non-df_positive_pairs as 0
-                subset: from network subset, label non-df_positive_pairs as 0
-            balanced (bool): _description_. Defaults to True.
+            df_composite (pl.DataFrame): Composite network.
+            df_positive_pairs (pl.DataFrame): Positive (co-complex) pairs.
+            label (str): Set to IS_CO_COMP.
+            seed (int, optional): Random seed. Uses the xval_iter number. Defaults to 0.
+            mode (Union[Literal['all'], Literal['subset']]): Mode (see below). Defaults to "subset".
+                all: from the entire network, label non-positive pairs as 0
+                subset: from network subset, label non-positive pairs as 0
+            balanced (bool, optional): Whether to balance negative and positive classes. Defaults to True.
 
         Raises:
-            Exception: _description_
+            Exception: Invalid mode.
 
         Returns:
-            pl.DataFrame: _description_
+            pl.DataFrame: Labeled composite network.
         """
-
         df_labeled = (
             df_composite.lazy()
             .join(
@@ -204,15 +109,16 @@ class ModelPreprocessor:
         self, df_labeled: pl.DataFrame, label: str, seed: int
     ) -> pl.DataFrame:
         """
-        Balances the size of the labels of the labeled set.
+        Balances the classes of the labeled dataset.
 
         Args:
-            df_labeled (pl.DataFrame): _description_
+            df_labeled (pl.DataFrame): Labeled dataset.
+            label (str): Set to IS_CO_COMP.
+            seed (int): Random seed.
 
         Returns:
-            pl.DataFrame: _description_
+            pl.DataFrame: Balanced version of df_labeled.
         """
-
         df_positive = df_labeled.filter(pl.col(label) == 1)
         df_negative = df_labeled.filter(pl.col(label) == 0)
 

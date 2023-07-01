@@ -31,7 +31,7 @@ class Preprocessor:
         Preprocess the composite protein network of SWC.
 
         Returns:
-            pl.DataFrame: _description_
+            pl.DataFrame: Composite network with SWC features.
         """
         SCORE = "SCORE"
         TYPE = "TYPE"
@@ -64,17 +64,30 @@ class Preprocessor:
         return df_swc
 
     def write_dip_proteins(self, df_dip_ppin_uniprot: pl.DataFrame) -> None:
+        """
+        Writes DIP proteins to a file. This is used in mapping DIP (uniprot) proteins
+        to KEGG IDs.
+
+        Args:
+            df_dip_ppin_uniprot (pl.DataFrame): DIP PPIN with Uniprot IDs.
+        """
         if not os.path.exists("../data/databases/dip_uniprot_kegg_mapped.tsv"):
             df_dip_uniprot_ids = (
                 df_dip_ppin_uniprot.melt(variable_name="PROTEIN_X", value_name=PROTEIN)
                 .select(PROTEIN)
-                .unique()
+                .unique(maintain_order=True)
             )
             df_dip_uniprot_ids.write_csv(
                 "../data/databases/dip_uniprot_ids.csv", has_header=False
             )
 
     def read_dip_ppin_uniprot(self) -> pl.DataFrame:
+        """
+        Extracts the PPI uniprot IDs from the DIP PPIN.
+
+        Returns:
+            pl.DataFrame: Dataframe of DIP PPIN with uniprot IDs.
+        """
         INTERACTOR_A = "ID interactor A"
         INTERACTOR_B = "ID interactor B"
         df_dip_ppin_uniprot = (
@@ -110,6 +123,15 @@ class Preprocessor:
     def map_dip_ppin_uniprot_to_kegg(
         self, df_dip_ppin_uniprot: pl.DataFrame
     ) -> pl.DataFrame:
+        """
+        Maps DIP Uniprot ID to KEGG.
+
+        Args:
+            df_dip_ppin_uniprot (pl.DataFrame): Dataframe of DIP PPIN with uniprot IDs.
+
+        Returns:
+            pl.DataFrame: Dataframe of DIP PPIN with KEGG IDs.
+        """
         FROM = "From"
         TO = "To"
         INTERACTOR_A = "ID interactor A"
@@ -124,7 +146,7 @@ class Preprocessor:
                 )
                 .select([pl.col(FROM), pl.col(TO).str.extract(r"sce:(.+)")])
                 .filter(pl.col(TO).str.lengths() > 0)
-                .unique()
+                .unique(maintain_order=True)
             )
 
             df_dip_ppin = (
@@ -144,57 +166,23 @@ class Preprocessor:
             print("Please map the DIP uniprot IDs to KEGG ID, then rerun this script")
             return pl.DataFrame()
 
-    def get_nips(self) -> pl.DataFrame:
-        """
-        Read Negatome 2.0 and map UniprotIDs to Systematic Name (KEGG).
-
-        Args:
-            version (str): _description_
-
-        Returns:
-            pl.DataFrame: _description_
-        """
-
-        lf_mapping = (
-            pl.scan_csv("../data/databases/negatome_kegg_mapped.txt", separator="\t")
-            .filter(pl.col("To").str.starts_with("sce:"))
-            .with_columns(pl.col("To").str.replace("sce:", ""))
-        )
-
-        df_nips = (
-            pl.scan_csv(
-                f"../data/databases/negatome_combined_stringent.txt",
-                has_header=False,
-                separator="\t",
-            )
-            .rename({"column_1": "u", "column_2": "v"})
-            .join(lf_mapping, left_on="u", right_on="From", how="inner")
-            .join(lf_mapping, left_on="v", right_on="From", how="inner")
-            .drop(["u", "v"])
-            .rename({"To": "u", "To_right": "v"})
-            .with_columns(sort_prot_cols("u", "v"))
-            .select([PROTEIN_U, PROTEIN_V])
-            .unique(maintain_order=True)
-        ).collect()
-
-        assert_prots_sorted(df_nips)
-
-        return df_nips
-
     def generate_kfolds(
         self, k: int, list_large_complexes: List[int]
     ) -> Tuple[str, Dict[int, List[str]]]:
         """
-        _summary_
+        Generate k folds from the list of large complexes (size >= 4).
+        NOTE: Only 1 fold is used for training, the rest (9 folds) are used for testing.
+        The other training complexes are those complexes whose size is less than or
+        equal to 3.
 
         Args:
-            k (int): _description_
-            list_large_complexes (List[int]): _description_
+            k (int): Number of folds. Set to 10.
+            list_large_complexes (List[int]): List of IDs of large complexes.
 
         Returns:
-            Tuple[str, Dict[int, List[str]]]: _description_
+            Tuple[str, Dict[int, List[str]]]: The output variable is for the SWC software.
+                The cross_val is for creating cross_val_table.csv in data/preprocessed/.
         """
-
         fold_size = round((1 / k) * len(list_large_complexes))
 
         output = ""
@@ -225,6 +213,16 @@ class Preprocessor:
         return output, cross_val
 
     def cross_val_to_df(self, k: int, cross_val: Dict[int, List[str]]) -> pl.DataFrame:
+        """
+        Creates the dataframe for cross_val_table.csv in data/preprocessed/.
+
+        Args:
+            k (int): Number of folds. Set to 10.
+            cross_val (Dict[int, List[str]]): The cross_val variable returned by generate_kfolds.
+
+        Returns:
+            pl.DataFrame: Cross-val table dataframe.
+        """
         CrossValDict = TypedDict(
             "CrossValDict", {"COMP_ID": List[int], "ITERS": List[List[str]]}
         )
@@ -263,16 +261,17 @@ class Preprocessor:
     ) -> Tuple[str, pl.DataFrame]:
         """
         Generate 10 rounds (iterations) of 10-fold cross-validation data.
-        In each round, 90% of complexes greater than 3 should be the testing set.
+        In each round, 90% of complexes with size than 3 should be the testing set.
         The rest are the training set.
 
         Args:
-            df_complexes (pl.DataFrame): _description_
+            df_complexes (pl.DataFrame): Complexes dataframe.
+            seed (int, optional): Seed. Defaults to 12345.
 
         Returns:
-            Tuple[str, pl.DataFrame]: _description_
+            Tuple[str, pl.DataFrame]: The output variable is for the SWC software.
+                The df_cross_val is for creating cross_val_table.csv in data/preprocessed/.
         """
-
         list_large_complexes: List[int] = (
             df_complexes.filter(pl.col(COMP_PROTEINS).list.lengths() > 3)
             .select(pl.col(COMP_ID))
@@ -288,6 +287,15 @@ class Preprocessor:
         return output, df_cross_val  # output is for the SWC software
 
     def read_irefindex(self) -> pl.DataFrame:
+        """
+        Read iRefIndex data. This is only used to compute for the REL feature.
+        NOTE: Only 2011 studies were considered.
+
+        Returns:
+            pl.DataFrame: Dataframe with columns PROTEIN_U, PROTEIN_V, and PUBMED that
+                specifies the PUBMED ID of the experiment that reports the interaction or
+                association between PROTEIN_U and PROTEIN_V.
+        """
         df = (
             pl.scan_csv(
                 "../data/databases/large/irefindex 559292 mitab26.txt", separator="\t"
@@ -335,7 +343,6 @@ if __name__ == "__main__":
     pl.Config.set_tbl_rows(5)
 
     preprocessor = Preprocessor()
-    df_nips = preprocessor.get_nips()
 
     df_swc = preprocessor.read_swc_composite_network()
     df_dip_ppin_uniprot = preprocessor.read_dip_ppin_uniprot()
@@ -350,9 +357,6 @@ if __name__ == "__main__":
     dip_output, df_dip_cross_val = preprocessor.generate_cross_val_data(
         df_complexes, seed=6789
     )
-
-    print(">>> NIPS")
-    print(df_nips)
 
     print(">>> SWC DATA - COMPOSITE PROTEIN NETWORK")
     print(df_swc)
@@ -374,9 +378,6 @@ if __name__ == "__main__":
 
     print(">>> DIP CROSS VAL DATA")
     print(df_dip_cross_val)
-
-    # Write files...
-    df_nips.write_csv("../data/preprocessed/yeast_nips.csv", has_header=False)
 
     df_swc.write_csv("../data/scores/swc_composite_scores.csv", has_header=True)
 

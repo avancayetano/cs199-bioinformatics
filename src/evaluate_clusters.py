@@ -1,14 +1,33 @@
 # pyright: basic
 
 import time
-from typing import Dict, List, Literal, NotRequired, Set, Tuple, TypedDict, Union
+from typing import Dict, List, Literal, Set, TypedDict, Union
 
 import matplotlib.pyplot as plt
 import polars as pl
 import seaborn as sns
-from sklearn.metrics import PrecisionRecallDisplay, auc
+from sklearn.metrics import auc
 
-from aliases import FEATURES, PROTEIN_U, PROTEIN_V, SCENARIO, SUPER_FEATS, WEIGHT
+from aliases import (
+    AVG_PR_AUC,
+    DENS_THRESH,
+    F1_SCORE,
+    FEATURES,
+    INFLATION,
+    MATCH_THRESH,
+    METHOD,
+    N_CLUSTERS,
+    N_EDGES,
+    PR_AUC,
+    PREC,
+    PROTEIN_U,
+    PROTEIN_V,
+    RECALL,
+    SCENARIO,
+    SUPER_FEATS,
+    WEIGHT,
+    XVAL_ITER,
+)
 from assertions import assert_prots_sorted
 from utils import (
     get_clusters_filename,
@@ -16,22 +35,6 @@ from utils import (
     get_complexes_list,
     get_weighted_filename,
 )
-
-INFLATION = "INFLATION"
-N_EDGES = "N_EDGES"
-METHOD = "METHOD"
-XVAL_ITER = "XVAL_ITER"
-
-N_CLUSTERS = "N_CLUSTERS"
-PREC = "PREC"
-RECALL = "RECALL"
-F_SCORE = "F_SCORE"
-MATCH_THRESH = "MATCH_THRESH"
-DENS_THRESH = "DENS_THRESH"
-
-AUC = "AUC"
-AVG_AUC = "AVG_AUC"
-SCENARIO = SCENARIO
 
 Subgraphs = List[Set[str]]
 ScoredCluster = TypedDict(
@@ -55,12 +58,10 @@ SvClusters = TypedDict(
     },
 )
 
-
 # the keys are MCL inflation parameter settings
 AllFeatClusters = Dict[int, FeatClusters]
 AllSvClusters = Dict[int, SvClusters]
 AllUnwClusters = Dict[int, ScoredClusters]
-
 
 FeatWeighted = Dict[str, pl.DataFrame]
 SvWeighted = Dict[str, Dict[int, pl.DataFrame]]
@@ -69,23 +70,23 @@ Edges = List[Union[Literal["20k_edges"], Literal["all_edges"]]]
 
 
 class ClustersEvaluator:
-    def __init__(
-        self,
-        inflations: List[int],
-        edges: Edges,
-        feat_methods: List[str],
-        sv_methods: List[str],
-        n_dens: int,
-        n_iters: int,
-        dip: bool,
-    ):
-        self.inflations = inflations
-        self.n_dens = n_dens
-        self.n_iters = n_iters
+    def __init__(self, dip: bool):
+        """
+        Evaluates the quality of clusters, i.e. the number of clusters that match
+        a complex, precision, recall, etc.
 
-        self.edges = edges
-        self.feat_methods = feat_methods
-        self.sv_methods = sv_methods
+        Args:
+            dip (bool): Whether to evaluate clusters from DIP or the original network.
+        """
+
+        self.inflations = [2, 3, 4, 5]
+        self.edges: Edges = ["all_edges", "20k_edges"]
+        self.feat_methods = [
+            f.lower() for f in FEATURES + list(map(lambda sf: sf["name"], SUPER_FEATS))
+        ]
+        self.sv_methods = ["swc", "xgw"]
+        self.n_dens = 100
+        self.n_iters = 10
 
         self.methods = ["unweighted"] + self.feat_methods + self.sv_methods
 
@@ -93,8 +94,8 @@ class ClustersEvaluator:
         self.idx = 0
         self.total = (
             len(self.inflations)
-            * (n_dens + 1)
-            * n_iters
+            * (self.n_dens + 1)
+            * self.n_iters
             * len(self.edges)
             * len(self.methods)
             * 2
@@ -103,6 +104,16 @@ class ClustersEvaluator:
         sns.set_palette("deep")
 
     def cluster_density(self, df_w: pl.DataFrame, cluster: Set[str]) -> float:
+        """
+        Gets the cluster density.
+
+        Args:
+            df_w (pl.DataFrame): Weighted network.
+            cluster (Set[str]): Cluster.
+
+        Returns:
+            float: Cluster density.
+        """
         if len(cluster) <= 1:
             return 0
         sorted_cluster = list(sorted(cluster))
@@ -128,12 +139,17 @@ class ClustersEvaluator:
         return density
 
     def cache_eval_data(self):
+        """
+        Caches all the necessary data.
+        """
         print("Caching necessary eval data (might take a while)...")
         train_complexes: List[Subgraphs] = [
-            get_complexes_list(xval_iter, "train") for xval_iter in range(self.n_iters)
+            get_complexes_list(xval_iter, "train", self.dip)
+            for xval_iter in range(self.n_iters)
         ]
         test_complexes: List[Subgraphs] = [
-            get_complexes_list(xval_iter, "test") for xval_iter in range(self.n_iters)
+            get_complexes_list(xval_iter, "test", self.dip)
+            for xval_iter in range(self.n_iters)
         ]
 
         feat_clusters: AllFeatClusters = {}
@@ -252,12 +268,13 @@ class ClustersEvaluator:
 
     def evaluate_complex_prediction(self):
         """
-        Terminologies:
-        - cluster: predicted cluster
-        - complex: reference (aka real) complex
-        - subgraph: either cluster or complex
-        """
+        NOTE: Performance evaluation is saved in data/evals/*_cluster_evals.csv.
 
+        Also, some terminologies.
+        - cluster: predicted cluster.
+        - complex: reference (aka real) complex.
+        - subgraph: either cluster or complex.
+        """
         print("Evaluating protein complex prediction")
         dens_thresholds = [0.0] + [(i + 1) / self.n_dens for i in range(self.n_dens)]
 
@@ -286,6 +303,18 @@ class ClustersEvaluator:
         dens_thresh: float,
         xval_iter: int,
     ) -> List[Dict[str, Union[str, float, int]]]:
+        """
+        Evaluates clusters.
+
+        Args:
+            inflation (int): MCL inflation parameter.
+            n_edges (Union[Literal['20k_edges'], Literal['all_edges']]): Either all or 20k edges.
+            dens_thresh (float): Cluster density threshold.
+            xval_iter (int): Cross-val iteration.
+
+        Returns:
+            List[Dict[str, Union[str, float, int]]]: Evaluations.
+        """
         evals: List[Dict[str, Union[str, float, int]]] = []
 
         for method in self.methods:
@@ -308,7 +337,7 @@ class ClustersEvaluator:
             evals.extend([metrics_050, metrics_075])
             self.idx += 2
             print(
-                f"[{self.idx}/{self.total}] Done evaluating {method} clusters on {n_edges}. dens_thresh={dens_thresh}. xval_iter={xval_iter}."
+                f"[{self.idx}/{self.total}] Done evaluating {method} clusters on {n_edges}. dens_thresh={dens_thresh}. xval_iter={xval_iter}. inflation={inflation}"
             )
 
         return evals
@@ -316,6 +345,17 @@ class ClustersEvaluator:
     def is_match(
         self, subgraph1: Set[str], subgraph2: Set[str], match_thresh: float
     ) -> bool:
+        """
+        Checks if two subgraphs match each other via Jaccard Index.
+
+        Args:
+            subgraph1 (Set[str]): First subgraph.
+            subgraph2 (Set[str]): Second subgraph.
+            match_thresh (float): Match threshold.
+
+        Returns:
+            bool: Whether they match or not.
+        """
         jaccard_idx = len(subgraph1.intersection(subgraph2)) / len(
             subgraph1.union(subgraph2)
         )
@@ -326,6 +366,17 @@ class ClustersEvaluator:
     def there_is_match(
         self, subgraph: Set[str], subgraphs_set: List[Set[str]], match_thresh: float
     ) -> bool:
+        """
+        Checks if a subgraph matches one subgraph in a subgraph list.
+
+        Args:
+            subgraph (Set[str]): Subgraph.
+            subgraphs_set (List[Set[str]]): Subgraph list.
+            match_thresh (float): Match threshold.
+
+        Returns:
+            bool: There is a match or not.
+        """
         for s in subgraphs_set:
             if self.is_match(subgraph, s, match_thresh):
                 return True
@@ -340,6 +391,20 @@ class ClustersEvaluator:
         dens_thresh: float,
         match_thresh: float,
     ) -> Dict[str, Union[str, float, int]]:
+        """
+        Calculates performance evaluation metrics.
+
+        Args:
+            inflation (int): MCL inflation parameter.
+            n_edges (Union[Literal['20k_edges'], Literal['all_edges']]): Either 20k or all edges.
+            method (str): Weighting method.
+            xval_iter (int): Cross-val iteration.
+            dens_thresh (float): Cluster density threshold.
+            match_thresh (float): Match threshold.
+
+        Returns:
+            Dict[str, Union[str, float, int]]: Performance evaluations.
+        """
         if method in self.sv_methods:
             scored_clusters = self.sv_clusters[inflation][n_edges][method][xval_iter]
         elif method in self.feat_methods:
@@ -350,13 +415,12 @@ class ClustersEvaluator:
         train_complexes = self.train_complexes[xval_iter]
         test_complexes = self.test_complexes[xval_iter]
 
-        # Get only the reliable clusters
+        # Get only clusters whose density >= dens_thresh.
         clusters = list(
             map(
                 lambda scored_cluster: scored_cluster["COMP_PROTEINS"],
                 filter(
-                    lambda scored_cluster: len(scored_cluster["COMP_PROTEINS"]) >= 3
-                    and scored_cluster["DENSITY"] >= dens_thresh,
+                    lambda scored_cluster: scored_cluster["DENSITY"] >= dens_thresh,
                     scored_clusters,
                 ),
             )
@@ -366,10 +430,9 @@ class ClustersEvaluator:
         prec_numerator = len(
             list(
                 filter(
-                    lambda cluster: (
-                        not self.there_is_match(cluster, train_complexes, match_thresh)
-                    )
-                    and (self.there_is_match(cluster, test_complexes, match_thresh)),
+                    lambda cluster: self.there_is_match(
+                        cluster, test_complexes, match_thresh
+                    ),
                     clusters,
                 )
             )
@@ -408,10 +471,10 @@ class ClustersEvaluator:
         recall = recall_numerator / recall_denominator
 
         if prec + recall > 0:
-            f_score = (2 * prec * recall) / (prec + recall)
+            f1_score = (2 * prec * recall) / (prec + recall)
         else:
-            print("WARNING!: zero precision and recall (denominator)")
-            f_score = 0
+            print("WARNING! Zero precision and recall. F-score set to 0.")
+            f1_score = 0
 
         n_clusters = len(clusters)
 
@@ -425,12 +488,12 @@ class ClustersEvaluator:
             N_CLUSTERS: n_clusters,
             PREC: prec,
             RECALL: recall,
-            F_SCORE: f_score,
+            F1_SCORE: f1_score,
         }
 
     def prec_recall_curves(self):
         """
-        Four precision-recall curves PER INFLATION SETTINGS!
+        Creates four precision-recall curves per inflation setting.
         - all_edges, match_thresh = 0.5
         - all_edges, match_thresh = 0.75
         - 20k_edges, match_thresh = 0.5
@@ -458,7 +521,7 @@ class ClustersEvaluator:
             df_20k_050_auc = self.get_prec_recall_auc(df_20k_050, "20k_050")
             df_20k_075_auc = self.get_prec_recall_auc(df_20k_075, "20k_075")
 
-            # Print AUC summary of the four scenarios
+            # Print PR_AUC summary of the four scenarios
             df_auc_summary = (
                 pl.concat(
                     [
@@ -470,43 +533,37 @@ class ClustersEvaluator:
                     how="vertical",
                 )
                 .pivot(
-                    values=AUC,
+                    values=PR_AUC,
                     index=METHOD,
                     columns=SCENARIO,
                     aggregate_function="first",
                 )
                 .with_columns(
                     [
-                        (pl.sum(pl.all().exclude(METHOD)) / 4).alias(AVG_AUC),
+                        (pl.sum(pl.all().exclude(METHOD)) / 4).alias(AVG_PR_AUC),
                         pl.lit(inflation).alias(INFLATION),
                     ]
                 )
             )
             df_evals = pl.concat([df_evals, df_auc_summary], how="vertical")
 
-            # n_methods = 6
-            # df_top_methods = (
-            #     df_auc_summary.sort(AVG_AUC, descending=True)
-            #     .select(METHOD)
-            #     .head(n_methods)
-            # )
         n_methods = 8
         df_evals_summary = (
             df_evals.groupby(METHOD)
             .mean()
-            .sort(AVG_AUC, descending=True)
+            .sort(AVG_PR_AUC, descending=True)
             .head(n_methods)
-            .select(pl.exclude([AVG_AUC, INFLATION]))
+            .select(pl.exclude([AVG_PR_AUC, INFLATION]))
             .melt(
                 id_vars=METHOD,
                 variable_name=SCENARIO,
-                value_name=AUC,
+                value_name=PR_AUC,
             )
         )
-        print(df_evals.groupby(METHOD).mean().sort(AVG_AUC, descending=True))
+        print(df_evals.groupby(METHOD).mean().sort(AVG_PR_AUC, descending=True))
         plt.figure()
         ax = sns.barplot(
-            data=df_evals_summary.to_pandas(), x=METHOD, y=AUC, hue=SCENARIO
+            data=df_evals_summary.to_pandas(), x=METHOD, y=PR_AUC, hue=SCENARIO
         )
         network = "DIP COMPOSITE NETWORK" if self.dip else "ORIGINAL COMPOSITE NETWORK"
         ax.set_title(
@@ -514,22 +571,8 @@ class ClustersEvaluator:
         )
         plt.xticks(rotation=15)
 
-        plt.figure()
-        ax = sns.barplot(
-            data=df_evals_summary.filter(
-                (pl.col(METHOD) == "XGW") | (pl.col(METHOD) == "SWC")
-            ).to_pandas(),
-            x=METHOD,
-            y=AUC,
-            hue=SCENARIO,
-        )
-        network = "DIP COMPOSITE NETWORK" if self.dip else "ORIGINAL COMPOSITE NETWORK"
-        ax.set_title(
-            f"{network}\nProtein Complex Detection\nXGW vs SWC in terms of Precision-Recall AUC"
-        )
-        plt.xticks(rotation=15)
-
         # # Plot the four curves
+        # TODO: plot only inflation=4 precision-recall curves.
         # self.plot_prec_recall_curve(
         #     df_all_050, df_top_methods, f"all edges, match_thresh=0.5"
         # )
@@ -546,6 +589,14 @@ class ClustersEvaluator:
     def plot_prec_recall_curve(
         self, df: pl.DataFrame, df_top_methods: pl.DataFrame, scenario: str
     ):
+        """
+        Creates plot of precision-recall curve.
+
+        Args:
+            df (pl.DataFrame): Performance evaluation dataframe.
+            df_top_methods (pl.DataFrame): Top methods.
+            scenario (str): Scenario.
+        """
         plt.figure()
         df_display = df.join(df_top_methods, on=METHOD, how="inner")
         sns.lineplot(
@@ -566,6 +617,21 @@ class ClustersEvaluator:
         match_thresh: float,
         inflation: int,
     ) -> pl.DataFrame:
+        """
+        Gets the precision-recall curve given n_edges, match_thresh, and inflation.
+        NOTE: Averages the precision and recall values on all the 10 cross-val iterations.
+        TODO: The above method may not be the best method. Maybe, try getting the AUC per
+            cross-val iteration, then average it after.
+
+        Args:
+            df_cluster_evals (pl.DataFrame): Cluster evaluations.
+            n_edges (str): Either 20k or all_edges.
+            match_thresh (float): Match threshold.
+            inflation (int): MCL inflation parameter.
+
+        Returns:
+            pl.DataFrame: Precision-recall given the supplied settings.
+        """
         df_prec_recall = (
             df_cluster_evals.lazy()
             .filter(
@@ -573,7 +639,7 @@ class ClustersEvaluator:
                 & (pl.col(MATCH_THRESH) == match_thresh)
                 & (pl.col(INFLATION) == inflation)
             )
-            .groupby([INFLATION, METHOD, DENS_THRESH])
+            .groupby([INFLATION, METHOD, DENS_THRESH])  # TODO: This may be unnecessary.
             .mean()
             .groupby([METHOD, DENS_THRESH])
             .mean()
@@ -586,6 +652,16 @@ class ClustersEvaluator:
     def get_prec_recall_auc(
         self, df_prec_recall: pl.DataFrame, scenario: str
     ) -> pl.DataFrame:
+        """
+        Gets the precision-recall AUC.
+
+        Args:
+            df_prec_recall (pl.DataFrame): Precision-recall dataframe.
+            scenario (str): Scenario.
+
+        Returns:
+            pl.DataFrame: Dataframe containing each method and its PR_AUC.
+        """
         df_auc = (
             df_prec_recall.lazy()
             .groupby(METHOD, maintain_order=True)
@@ -597,7 +673,7 @@ class ClustersEvaluator:
                         prec_recall.struct.field(PREC),
                     )
                 )
-                .alias(AUC)
+                .alias(PR_AUC)
             )
             .with_columns(pl.lit(scenario).alias(SCENARIO))
             .collect()
@@ -606,6 +682,13 @@ class ClustersEvaluator:
         return df_auc
 
     def main(self, re_eval: bool = True):
+        """
+        Main function.
+
+        Args:
+            re_eval (bool, optional): Whether to re-evaluate the clusters or not.
+                If not, read the saved performance evaluations instead. Defaults to True.
+        """
         if re_eval:
             self.cache_eval_data()
             self.evaluate_complex_prediction()
@@ -616,30 +699,13 @@ class ClustersEvaluator:
 if __name__ == "__main__":
     pl.Config.set_tbl_cols(30)
     pl.Config.set_tbl_rows(21)
-    sns.set_palette("deep")
     start = time.time()
-    inflations = [2, 3, 4, 5]
-    edges: Edges = ["all_edges", "20k_edges"]
-    feat_methods = [
-        f.lower() for f in FEATURES + list(map(lambda sf: sf["name"], SUPER_FEATS))
-    ]
-    sv_methods = ["swc", "xgw"]
-    n_dens = 100
-    n_iters = 10
 
     print()
     print(
         "==================== CLUSTER EVALUATION ON COMPOSITE NETWORK =================="
     )
-    cluster_eval = ClustersEvaluator(
-        inflations=inflations,
-        edges=edges,
-        feat_methods=feat_methods,
-        sv_methods=sv_methods,
-        n_dens=n_dens,
-        n_iters=n_iters,
-        dip=False,
-    )
+    cluster_eval = ClustersEvaluator(dip=False)
     cluster_eval.main(re_eval=False)
     print("==============================================================")
     print()
@@ -648,15 +714,7 @@ if __name__ == "__main__":
     print(
         "==================== CLUSTER EVALUATION ON DIP COMPOSITE NETWORK =================="
     )
-    cluster_eval = ClustersEvaluator(
-        inflations=inflations,
-        edges=edges,
-        feat_methods=feat_methods,
-        sv_methods=sv_methods,
-        n_dens=n_dens,
-        n_iters=n_iters,
-        dip=True,
-    )
+    cluster_eval = ClustersEvaluator(dip=True)
     cluster_eval.main(re_eval=False)
     print("==============================================================")
     print()

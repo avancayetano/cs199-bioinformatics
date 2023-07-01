@@ -7,6 +7,12 @@
 # ./run_mcl.sh ../data/weighted/ all_edges/features/ 4
 # ./run_mcl.sh ../data/weighted/ 20k_edges/ 4
 
+# NOTE: running ./run_mcl.sh ../data/weighted/ ./ 4 will run MCL (with inflation=4)
+# on all the files inside ../data/weighted/
+
+# Likewise, running ./run_mcl.sh ../data/weighted/ all_edges/cross_val/ 4 will run
+# MCL on all the files inside ../data/weighted/all_edges/cross_val/
+
 parent_dir=$1
 edges_dir=$2
 inflation=$3

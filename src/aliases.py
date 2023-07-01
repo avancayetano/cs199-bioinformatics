@@ -1,29 +1,44 @@
 from typing import List, TypedDict
 
+"""
+This is a collection of aliases/column names for the dataframes.
+"""
+
+# General
 PROTEIN_U = "PROTEIN_U"
 PROTEIN_V = "PROTEIN_V"
 PUBMED = "PUBMED"
 PROTEIN = "PROTEIN"
 
+# Complexes
 COMP_ID = "COMP_ID"
 COMP_PROTEINS = "COMP_PROTEINS"
 COMP_INFO = "COMP_INFO"
 DENSITY = "DENSITY"
 
-XVAL_ITER = "ITER"  # for cross-validation iterations
-METHOD = "METHOD"
-SCENARIO = "SCENARIO"
-VALUE = "VALUE"
 
 # Metrics
 METRIC = "METRIC"
-PRECISION = "PRECISION"
+PREC = "PREC"
 RECALL = "RECALL"
 PR_AUC = "PR_AUC"
+AVG_PR_AUC = "AVG_PR_AUC"
 F1_SCORE = "F1_SCORE"
 RMSE = "RMSE"
 BRIER_SCORE = "BRIER_SCORE"
 LOG_LOSS = "LOG_LOSS"
+
+
+# Metric-related
+XVAL_ITER = "ITER"
+METHOD = "METHOD"
+SCENARIO = "SCENARIO"
+VALUE = "VALUE"
+INFLATION = "INFLATION"
+N_EDGES = "N_EDGES"
+N_CLUSTERS = "N_CLUSTERS"
+MATCH_THRESH = "MATCH_THRESH"
+DENS_THRESH = "DENS_THRESH"
 
 
 # SWC Features

@@ -14,7 +14,8 @@ SCORE = CO_EXP
 
 class CoExpScoring:
     """
-    Scoring of PPIs based on their gene co-expression correlation.
+    Scoring of PPIs based on their gene co-expression correlation using
+    Pearson correlation coefficient.
 
     Uses the GSE3431 gene expression data by Tu et al (2005).
     """
@@ -24,12 +25,11 @@ class CoExpScoring:
         Reads the gene expression file (GSE3431).
 
         Args:
-            path (str): _description_
+            path (str): Path to the gene expression file.
 
         Returns:
-            pl.DataFrame: _description_
+            pl.DataFrame: Dataframe of the gene expression file.
         """
-
         df_gene_exp = (
             pl.scan_csv(path, has_header=True, separator="\t", skip_rows_after_header=1)
             .select(pl.exclude(["NAME", "GWEIGHT"]))
@@ -43,12 +43,11 @@ class CoExpScoring:
         Gets all the unique proteins in the gene expression data.
 
         Args:
-            df_gene_exp (pl.DataFrame): _description_
+            df_gene_exp (pl.DataFrame): Gene expression dataframe.
 
         Returns:
-            pl.Series: _description_
+            pl.Series: Series of unique proteins in gene expression data.
         """
-
         srs_gene_exp_prots = (
             df_gene_exp.lazy().select(pl.col(PROTEIN)).unique().collect().to_series()
         )
@@ -58,17 +57,15 @@ class CoExpScoring:
         self, df_edges: pl.DataFrame, srs_gene_exp_prots: pl.Series
     ) -> pl.DataFrame:
         """
-        Filters out edges which have a protein that does not have
-        gene expression data.
+        Filters out edges which have a protein that does not have gene expression data.
 
         Args:
-            df_edges (pl.DataFrame): _description_
-            srs_gene_exp_prots (pl.Series): _description_
+            df_edges (pl.DataFrame): Edges of the composite network.
+            srs_gene_exp_prots (pl.Series): Series of unique proteins in gene expression data.
 
         Returns:
-            pl.DataFrame: _description_
+            pl.DataFrame: Filtered version of df_edges.
         """
-
         df_filtered = (
             df_edges.lazy()
             .filter(
@@ -80,80 +77,24 @@ class CoExpScoring:
 
         return df_filtered
 
-    def standardize_gene_exp(
-        self, df_gene_exp: pl.DataFrame, time_points: List[str]
-    ) -> pl.DataFrame:
-        """
-        NOTE: not used...
-
-        Args:
-            df_gene_exp (pl.DataFrame): _description_
-            time_points (List[str]): _description_
-
-        Returns:
-            pl.DataFrame: _description_
-        """
-
-        n = len(time_points)
-        df_gene_exp_std = (
-            df_gene_exp.lazy()
-            .with_columns((pl.sum(time_points) / n).alias(GE_MEAN))
-            .with_columns(
-                (
-                    pl.sum([(pl.col(t) - pl.col(GE_MEAN)).pow(2) for t in time_points])
-                    / (n - 1)
-                )
-                .sqrt()
-                .alias(GE_SD)
-            )
-            .with_columns(
-                [
-                    ((pl.col(t) - pl.col(GE_MEAN)) / pl.col(GE_SD)).alias(t)
-                    for t in time_points
-                ]
-            )
-            .select([PROTEIN] + time_points)
-            .collect()
-        )
-
-        return df_gene_exp_std
-
-    def normalize_gene_exp(
-        self, df_gene_exp: pl.DataFrame, time_points: List[str]
-    ) -> pl.DataFrame:
-        """
-        NOTE: not used...
-
-        Args:
-            df_gene_exp (pl.DataFrame): _description_
-            time_points (List[str]): _description_
-
-        Returns:
-            pl.DataFrame: _description_
-        """
-
-        df_gene_exp_norm = (
-            df_gene_exp.lazy()
-            .with_columns(
-                [
-                    (
-                        (pl.col(t) - pl.col(t).min())
-                        / (pl.col(t).max() - pl.col(t).min())
-                    ).alias(t)
-                    for t in time_points
-                ]
-            )
-            .collect()
-        )
-
-        return df_gene_exp_norm
-
     def melt_edges_gene_exp(
         self,
         df_filtered: pl.DataFrame,
         df_gene_exp: pl.DataFrame,
         time_points: List[str],
     ) -> pl.DataFrame:
+        """
+        Combines the edges of the protein network and the gene expression data.
+
+        Args:
+            df_filtered (pl.DataFrame): Filtered version of df_edges.
+            df_gene_exp (pl.DataFrame): Gene expression data.
+            time_points (List[str]): List of time points.
+
+        Returns:
+            pl.DataFrame: Melted dataframe containing the edges of the protein network
+                and gene expression data.
+        """
         df_edges_gene_exp = (
             df_filtered.lazy()
             .join(df_gene_exp.lazy(), left_on=PROTEIN_U, right_on=PROTEIN, how="left")
@@ -189,8 +130,10 @@ class CoExpScoring:
 
     def remove_negative_corr(self) -> pl.Expr:
         """
+        An Expr that removes protein pairs with negative gene expression correlation.
+
         Returns:
-            pl.Expr: Removes protein pairs with negative gene expression correlation.
+            pl.Expr: Expr that does the aforementioned.
         """
         return (
             pl.when(pl.col(SCORE) < 0.0)
@@ -199,32 +142,18 @@ class CoExpScoring:
             .alias(SCORE)
         )
 
-    def normalize(self) -> pl.Expr:
-        """
-        Returns:
-            pl.Expr: Normalizes the scores.
-        """
-
-        return (
-            (pl.col(SCORE) - pl.col(SCORE).min())
-            / (pl.col(SCORE).max() - pl.col(SCORE).min())
-        ).alias(SCORE)
-
-    def rmse(self, col_a: str, col_b: str) -> pl.Expr:
-        return (pl.col(col_a) - pl.col(col_b)).pow(2).mean().sqrt()
-
     def score(
         self, df_filtered: pl.DataFrame, df_gene_exp: pl.DataFrame
     ) -> pl.DataFrame:
         """
-        Finds the correlation of the gene expression of each protein pair per cycle.
+        Finds the correlation of the gene expression of each protein pair.
 
         Args:
-            df_filtered (pl.DataFrame): _description_
-            df_gene_exp (pl.DataFrame): _description_
+            df_filtered (pl.DataFrame): Filtered df_edges.
+            df_gene_exp (pl.DataFrame): Gene expression data.
 
         Returns:
-            pl.DataFrame: _description_
+            pl.DataFrame: Weighted df_filtered.
         """
 
         time_points = [f"T{i}" for i in range(1, 37)]  # 36 time points
@@ -250,11 +179,11 @@ class CoExpScoring:
         CoExpScoring main method.
 
         Args:
-            df_edges (pl.DataFrame): _description_
-            df_gene_exp (pl.DataFrame): _description_
+            df_edges (pl.DataFrame): Edges of the composite protein network.
+            df_gene_exp (pl.DataFrame): Gene expression data.
 
         Returns:
-            pl.DataFrame: _description_
+            pl.DataFrame: Weighted protein network.
         """
 
         # Gene expression data

@@ -1,3 +1,5 @@
+# This module contains utility functions.
+
 from typing import List, Literal, Optional, Set, Tuple
 
 import polars as pl
@@ -16,13 +18,19 @@ from assertions import assert_prots_sorted
 
 def sort_prot_cols(prot_u: str, prot_v: str) -> List[pl.Expr]:
     """
-    Sort the two protein columns such that the first protein
+    Sorts the two protein columns such that the first protein
     is lexicographically less than the second.
 
     The aliases of the two sorted columns is PROTEIN_U and
     PROTEIN_V, respectively.
-    """
 
+    Args:
+        prot_u (str): Label for the first protein.
+        prot_v (str): Label for the second protein.
+
+    Returns:
+        List[pl.Expr]: List of Expr that does the above sorting.
+    """
     exp = [
         pl.when(pl.col(prot_u) < pl.col(prot_v))
         .then(pl.col(prot_u))
@@ -44,8 +52,12 @@ def construct_composite_network(
     Constructs the composite protein network based on the selected features.
     By default, gets all the features.
 
+    Args:
+        dip (bool): Whether to get the DIP or the original composite network.
+        features (Optional[List[str]], optional): List of features to retrieve. Defaults to None.
+
     Returns:
-        pl.DataFrame: _description_
+        pl.DataFrame: Composite network.
     """
     prefix = "dip_" if dip else ""
     scores_files = [
@@ -81,75 +93,72 @@ def construct_composite_network(
     return df_composite
 
 
-# def get_clusters_list(path: str, scored: bool = False) -> List[List[str]]:
-#     """
-#     Proteins are sorted in each subgraph.
-#     """
-#     if scored:
-#         path = path.replace("clusters", "scored_clusters")
-
-#     clus: List[Set[str]] = []
-#     with open(path) as file:
-#         lines = file.readlines()
-#         for line in lines:
-#             line = line.strip()
-#             proteins = set(line.split("\t"))  # to remove duplicates, if there is any
-#             clus.append(proteins)
-
-#     clusters: List[List[str]] = list(map(lambda c: sorted(c), clus))
-
-#     return clusters
-
-
-def get_clusters_list(path: str, scored: bool = False) -> List[Set[str]]:
+def get_clusters_list(path: str) -> List[Set[str]]:
     """
-    Proteins are sorted in each subgraph.
-    """
-    if scored:
-        path = path.replace("clusters", "scored_clusters")
+    Gets the list of clusters.
 
+    Args:
+        path (str): Path to clusters file.
+
+    Returns:
+        List[Set[str]]: List of clusters.
+    """
     clus: List[Set[str]] = []
     with open(path) as file:
         lines = file.readlines()
         for line in lines:
             line = line.strip()
-            proteins = set(line.split("\t"))  # to remove duplicates, if there is any
+            proteins = set(line.split("\t"))
             clus.append(proteins)
 
-    clusters: List[Set[str]] = list(map(lambda c: set(c), clus))
+    clusters: List[Set[str]] = list(filter(lambda c: len(c) >= 4, clus))
 
     return clusters
 
 
 def get_complexes_list(
-    xval_iter: Optional[int] = None, complex_type: Literal["train", "test"] = "test"
+    xval_iter: int, complex_type: Literal["train", "test"], dip: bool
 ) -> List[Set[str]]:
     """
-    Proteins are sorted in each subgraph.
-    """
+    Gets the list of complexes based on cross-val iteration and complex type.
 
+    Args:
+        xval_iter (int): Cross-val iteration.
+        complex_type (Literal['train', 'test']): Either train or test.
+        dip (bool): Whether to retrieve complexes using DIP cross_val_table or not.
+
+    Returns:
+        List[Set[str]]: List of complexes.
+    """
     df_complexes = get_all_cyc_complexes()
 
-    if xval_iter is None:
-        cmps: List[List[str]] = df_complexes.select(COMP_PROTEINS).to_series().to_list()
-
+    if dip:
+        df_cross_val = pl.read_csv("../data/preprocessed/dip_cross_val_table.csv")
+        print("Using: dip_cross_val_table.csv")
     else:
         df_cross_val = pl.read_csv("../data/preprocessed/cross_val_table.csv")
-        df_complex_ids = df_cross_val.filter(
-            pl.col(f"{XVAL_ITER}_{xval_iter}") == complex_type
-        ).select(COMP_ID)
-        cmps: List[List[str]] = (
-            df_complexes.join(df_complex_ids, on=COMP_ID, how="inner")
-            .select(COMP_PROTEINS)
-            .to_series()
-            .to_list()
-        )
+        print("Using: cross_val_table.csv")
+    df_complex_ids = df_cross_val.filter(
+        pl.col(f"{XVAL_ITER}_{xval_iter}") == complex_type
+    ).select(COMP_ID)
+    cmps: List[List[str]] = (
+        df_complexes.join(df_complex_ids, on=COMP_ID, how="inner")
+        .select(COMP_PROTEINS)
+        .to_series()
+        .to_list()
+    )
 
     complexes: List[Set[str]] = list(map(lambda c: set(c), cmps))
     return complexes
 
 
 def get_all_cyc_complexes() -> pl.DataFrame:
+    """
+    Gets all CYC2008 complexes.
+
+    Returns:
+        pl.DataFrame: CYC2008 complexes dataframe.
+    """
     df_complexes = (
         pl.scan_csv("../data/swc/complexes_CYC.txt", has_header=False, separator="\t")
         .rename(
@@ -164,22 +173,19 @@ def get_all_cyc_complexes() -> pl.DataFrame:
         .sort(pl.col(COMP_ID))
         .collect()
     )
-    # check if protein strings are stripped
-    # print(df_complexes)
-    # df = df_complexes.select(COMP_PROTEINS).select(
-    #     pl.col(COMP_PROTEINS)
-    #     .list.eval(pl.element().str.contains("\n").any())
-    #     .list.get(0)
-    # )
-    # print(df)
-    # print(df.select(pl.col(COMP_PROTEINS).any()))
     return df_complexes
 
 
-get_all_cyc_complexes()
-
-
 def get_unique_proteins(df: pl.DataFrame) -> pl.Series:
+    """
+    Gets all the unique proteins in a dataframe.
+
+    Args:
+        df (pl.DataFrame): Any dataframe with PROTEIN_U and PROTEIN_V columns.
+
+    Returns:
+        pl.Series: Series of unique proteins.
+    """
     srs_proteins = (
         df.lazy()
         .select([PROTEIN_U, PROTEIN_V])
@@ -194,6 +200,12 @@ def get_unique_proteins(df: pl.DataFrame) -> pl.Series:
 
 
 def get_all_cyc_proteins() -> pl.Series:
+    """
+    Gets all the unique CYC2008 proteins.
+
+    Returns:
+        pl.Series: Series of all the unique CYC2008 proteins.
+    """
     srs_proteins = (
         pl.scan_csv("../data/swc/complexes_CYC.txt", has_header=False, separator="\t")
         .rename(
@@ -212,15 +224,17 @@ def get_all_cyc_proteins() -> pl.Series:
     return srs_proteins
 
 
-def get_cyc_comp_pairs(df_complex_ids: Optional[pl.DataFrame] = None):
+def get_cyc_comp_pairs(df_complex_ids: Optional[pl.DataFrame] = None) -> pl.DataFrame:
     """
+    Gets all CYC2008 co-complex pairs from an input of complex ID list.
     If None, gets all co-complex pairs.
 
     Args:
-        df_complex_ids (Optional[pl.DataFrame], optional): _description_. Defaults to None.
+        df_complex_ids (Optional[pl.DataFrame], optional): List of complex IDs. Defaults to None.
 
     Returns:
-        _type_: _description_
+        pl.DataFrame: Dataframe with two columns: PROTEIN_U and PROTEIN_V, where each row
+            is a co-complex pair.
     """
 
     df_all_complexes = get_all_cyc_complexes()
@@ -259,9 +273,25 @@ def get_cyc_comp_pairs(df_complex_ids: Optional[pl.DataFrame] = None):
     return df_comp_pairs
 
 
-def get_cyc_train_test_comp_pairs(xval_iter: int) -> Tuple[pl.DataFrame, pl.DataFrame]:
-    df_cross_val = pl.read_csv("../data/preprocessed/cross_val_table.csv")
+def get_cyc_train_test_comp_pairs(
+    xval_iter: int, dip: bool
+) -> Tuple[pl.DataFrame, pl.DataFrame]:
+    """
+    Gets the train, test co-complex pairs for a certain cross-val iteration.
 
+    Args:
+        xval_iter (int): Cross-val iteration.
+        dip (bool): Whether to retrieve complexes using DIP cross_val_table or not.
+
+    Returns:
+        Tuple[pl.DataFrame, pl.DataFrame]: Tuple of train, test co-complex pairs.
+    """
+    if dip:
+        df_cross_val = pl.read_csv("../data/preprocessed/dip_cross_val_table.csv")
+        print("Using: dip_cross_val_table.csv")
+    else:
+        df_cross_val = pl.read_csv("../data/preprocessed/cross_val_table.csv")
+        print("Using: cross_val_table.csv")
     df_train_ids = df_cross_val.filter(
         pl.col(f"{XVAL_ITER}_{xval_iter}") == "train"
     ).select(COMP_ID)
@@ -287,23 +317,47 @@ def get_clusters_filename(
     inflation: int,
     dip: bool,
     xval_iter: int = -1,
-    scored: bool = False,
-):
+) -> str:
+    """
+    Gets the clusters filename given the parameters.
+
+    Args:
+        n_edges (str): Either 20k_edges or all_edges.
+        method (str): Weighting method.
+        supervised (bool): Supervised method or not.
+        inflation (int): MCL inflation parameter.
+        dip (bool): Whether to retrieve DIP clusters or not.
+        xval_iter (int, optional): Cross-val iteration. Defaults to -1.
+
+    Returns:
+        str: Path to clusters file.
+    """
     prefix = "dip_" if dip else ""
     method = method.lower()
-    clusters = "scored_clusters" if scored else "clusters"
     if method == "unweighted":
-        return f"../data/{clusters}/out.{prefix}{method}.csv.I{inflation}0"
+        return f"../data/clusters/out.{prefix}{method}.csv.I{inflation}0"
 
     suffix = "_20k" if n_edges == "20k_edges" else ""
     if supervised:
-        return f"../data/{clusters}/{n_edges}/cross_val/out.{prefix}{method}{suffix}_iter{xval_iter}.csv.I{inflation}0"
-    return f"../data/{clusters}/{n_edges}/features/out.{prefix}{method}{suffix}.csv.I{inflation}0"
+        return f"../data/clusters/{n_edges}/cross_val/out.{prefix}{method}{suffix}_iter{xval_iter}.csv.I{inflation}0"
+    return f"../data/clusters/{n_edges}/features/out.{prefix}{method}{suffix}.csv.I{inflation}0"
 
 
 def get_weighted_filename(
     method: str, supervised: bool, dip: bool, xval_iter: int = -1
-):
+) -> str:
+    """
+    Gets the weighted network filename given the parameters.
+
+    Args:
+        method (str): Weighting method.
+        supervised (bool): Supervised method or not.
+        dip (bool): Whether to retrieve DIP weighted network or not.
+        xval_iter (int, optional): Cross-val iteration. Defaults to -1.
+
+    Returns:
+        str: Path to weighted network file.
+    """
     prefix = "dip_" if dip else ""
     method = method.lower()
     if method == "unweighted":

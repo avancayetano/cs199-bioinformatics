@@ -1,5 +1,5 @@
 """
-A script that weights the composite network using RFW and the features.
+A script that weights the composite network using XGW and the features.
 """
 
 import time
@@ -30,11 +30,27 @@ class FeatureWeighting:
     def main(
         self, df_composite: pl.DataFrame, features: List[str], name: str
     ) -> pl.DataFrame:
+        """
+        Weighting method for feature weighting methods.
+        NOTE:
+        1. If method is a super feature, this gets the average of all the features
+            of the super feature.
+        2. Only gets non-zero weights.
+
+        Args:
+            df_composite (pl.DataFrame): Composite network.
+            features (List[str]): List of features.
+            name (str): Name of the method.
+
+        Returns:
+            pl.DataFrame: Weighted network.
+        """
         df_w_composite = (
             df_composite.lazy()
             .select([PROTEIN_U, PROTEIN_V, *features])
             .with_columns((pl.sum(features) / len(features)).alias(WEIGHT))
             .select([PROTEIN_U, PROTEIN_V, WEIGHT])
+            .filter(pl.col(WEIGHT) > 0)
             .collect()
         )
 
@@ -62,6 +78,12 @@ class FeatureWeighting:
 
 class Weighting:
     def __init__(self, dip: bool):
+        """
+        Does all the weighting of all the methods.
+
+        Args:
+            dip (bool): Whether to weight DIP network or not.
+        """
         self.model_prep = ModelPreprocessor()
         self.df_composite = construct_composite_network(dip=dip)
         assert_df_bounded(self.df_composite, FEATURES)
@@ -69,10 +91,14 @@ class Weighting:
         self.dip = dip
 
     def main(self):
+        """
+        Main method.
+        """
         prefix = "dip_" if self.dip else ""
 
         print("---------------------------------------------------------")
         print("Writing unweighted network")
+
         df_unweighted = (
             self.df_composite.filter(pl.col(TOPO) > 0)
             .with_columns(pl.lit(1.0).alias(WEIGHT))
@@ -111,10 +137,12 @@ class Weighting:
         print()
 
         # Supervised co-complex probability weighting
+        # This is a good baseline model parameters set.
         xgw_params = {
             "objective": "binary:logistic",
             "n_estimators": 1000,
             "max_depth": 3,
+            "gamma": 0,
             "lambda": 100,
             "subsample": 0.8,
             "colsample_bytree": 0.8,
@@ -122,11 +150,27 @@ class Weighting:
             "learning_rate": 0.01,
             "tree_method": "exact",
         }
-        xgw = SupervisedWeighting(XGBClassifier(**xgw_params), "XGW", dip=self.dip)
+
+        # for hyperparameter tuning. NOTE: takes too much time
+        xgw_params_grid = {
+            "objective": ["binary:logistic"],
+            "n_estimators": [500, 1000],
+            "max_depth": [3, 6],
+            "gamma": [0, 1, 5],
+            "lambda": [1, 10, 100],
+            "subsample": [0.8, 1.0],
+            "colsample_bytree": [0.8, 1.0],
+            "n_jobs": [-1],
+            "learning_rate": [0.01],
+            "tree_method": ["hist"],
+        }
+
+        xgw_model = XGBClassifier(**xgw_params)  # untuned, baseline model
+        xgw = SupervisedWeighting(xgw_model, "XGW", dip=self.dip)
 
         for xval_iter in range(n_iters):
             print(f"------------------- BEGIN: ITER {xval_iter} ---------------------")
-            df_train_pairs, _ = get_cyc_train_test_comp_pairs(xval_iter)
+            df_train_pairs, _ = get_cyc_train_test_comp_pairs(xval_iter, self.dip)
             df_train_labeled = self.model_prep.label_composite(
                 self.df_composite,
                 df_train_pairs,
@@ -172,7 +216,9 @@ class Weighting:
             )
 
             # Weight the network using XGW
-            df_w_xgw = xgw.main(self.df_composite, df_train_labeled, xval_iter)
+            df_w_xgw = xgw.main(
+                self.df_composite, df_train_labeled, xval_iter, True, xgw_params_grid
+            )
 
             assert_df_bounded(df_w_xgw, [WEIGHT])
 
@@ -194,16 +240,12 @@ if __name__ == "__main__":
     pl.Config.set_tbl_cols(15)
     start = time.time()
 
-    print(
-        "=======================  Weighting the composite network ==========================="
-    )
+    print("====================  Weighting the composite network ====================")
     weighting = Weighting(dip=False)
     weighting.main()
     print()
 
-    print(
-        "======================= Weighting the DIP composite network ==========================="
-    )
+    print("================== Weighting the DIP composite network ===================")
     weighting = Weighting(dip=True)
     weighting.main()
     print()

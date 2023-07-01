@@ -22,7 +22,7 @@ NUMERATOR = "NUMERATOR"
 DENOMINATOR = "DENOMINATOR"
 
 """
-This is a script that enriches the DIP PPIN into a omposite network by 
+This is a script that enriches the DIP PPIN into a composite network by 
 topological scoring and integrating CO_OCCUR and STRING.
 """
 
@@ -30,13 +30,27 @@ topological scoring and integrating CO_OCCUR and STRING.
 class TopoScoring:
     """
     Topological scoring of PPIs for the DIP PPIN.
-    An Implementation of iterative AdjustCD [Liu et al., 2009].
+    An implementation of iterative AdjustCD [Liu et al., 2009].
     """
 
     def __init__(self, n_batches: int = 1) -> None:
+        """
+        Args:
+            n_batches (int, optional): Number of batches (to avoid out-of-memory errors).
+                Defaults to 1.
+        """
         self.n_batches = n_batches
 
     def construct_l2_network(self, df_ppin: pl.DataFrame) -> pl.DataFrame:
+        """
+        Construct a protein network containing only level-2 neighbors.
+
+        Args:
+            df_ppin (pl.DataFrame): The PPIN.
+
+        Returns:
+            pl.DataFrame: Level-2 protein network.
+        """
         df_ppin_rev = df_ppin.select(
             [pl.col(PROTEIN_U).alias(PROTEIN_V), pl.col(PROTEIN_V).alias(PROTEIN_U)]
         ).select([PROTEIN_U, PROTEIN_V])
@@ -62,9 +76,8 @@ class TopoScoring:
         Expression that gets the weighted degree of each protein
 
         Returns:
-            pl.Expr: _description_
+            pl.Expr: Expr that does the aforementioned.
         """
-
         return (
             pl.col(NEIGHBORS).list.eval(pl.element().list.get(1).cast(float)).list.sum()
         ).alias(W_DEG)
@@ -77,14 +90,11 @@ class TopoScoring:
             together with their weights. (List[List[PROT, TOPO]])
 
         Args:
-            df_w_ppin (pl.DataFrame): _description_
+            df_w_ppin (pl.DataFrame): Weighted PPIN at the previous iteration.
 
         Returns:
-            pl.DataFrame: _description_
-
-        TODO: Is there a better way to represent the second column?
+            pl.DataFrame: The dataframe described above.
         """
-
         df_neighbors = (
             df_w_ppin.vstack(
                 df_w_ppin.select(
@@ -108,8 +118,13 @@ class TopoScoring:
     def get_avg_prot_w_deg(self, df_neighbors: pl.DataFrame) -> float:
         """
         Gets the average weighted degree of all the proteins.
-        """
 
+        Args:
+            df_neighbors (pl.DataFrame): Dataframe returned by get_neighbors.
+
+        Returns:
+            float: The average weighted degree of all the proteins.
+        """
         avg_weight = df_neighbors.select(
             (pl.col(W_DEG).sum()) / pl.count(PROTEIN)
         ).item()
@@ -124,14 +139,13 @@ class TopoScoring:
         - w_deg col: the weighted degree of PROTEIN_X
 
         Args:
-            df_w_ppin (pl.DataFrame): _description_
-            df_neighbors (pl.DataFrame): _description_
-            PROTEIN_X (str): _description_
+            df_w_ppin (pl.DataFrame): Weighted PPIN at the previous iteration.
+            df_neighbors (pl.DataFrame): Dataframe returned by get_neighbors.
+            PROTEIN_X (str): Either PROTEIN_U or PROTEIN_V.
 
         Returns:
-            pl.DataFrame: _description_
+            pl.DataFrame: Dataframe described above.
         """
-
         df = (
             df_w_ppin.lazy()
             .select([PROTEIN_U, PROTEIN_V])
@@ -157,7 +171,7 @@ class TopoScoring:
         The numerator expression in the formula of AdjustCD.
 
         Returns:
-            pl.Expr: _description_
+            pl.Expr: Expr of the above.
         """
 
         return (
@@ -177,10 +191,10 @@ class TopoScoring:
         The denominator expression in the formula of AdjustCD.
 
         Args:
-            avg_prot_w_deg (float): _description_
+            avg_prot_w_deg (float): Average weighted degree returned by get_avg_prot_w_deg.
 
         Returns:
-            pl.Expr: _description_
+            pl.Expr: Expr of the above.
         """
 
         return (
@@ -202,7 +216,19 @@ class TopoScoring:
         df_neighbors: pl.DataFrame,
         avg_prot_w_deg: float,
         SCORE: str,
-    ):
+    ) -> pl.DataFrame:
+        """
+        Scores a batch of PPIN edges.
+
+        Args:
+            df_w_ppin_batch (pl.DataFrame): Weighted PPIN batch from the previous iteration.
+            df_neighbors (pl.DataFrame): Neighbors dataframe.
+            avg_prot_w_deg (float): Average protein weighted degree.
+            SCORE (str): Either TOPO or TOPO_L2.
+
+        Returns:
+            pl.DataFrame: Weighted PPIN batch.
+        """
         lf_joined = (
             self.join_prot_neighbors(df_w_ppin_batch, df_neighbors, PROTEIN_U)
             .lazy()
@@ -243,12 +269,13 @@ class TopoScoring:
         SCORE: str = TOPO,
     ) -> pl.DataFrame:
         """
-        Scores the each PPI of the PPIN.
+        Scores each PPI of the PPIN.
 
         Args:
-            df_w_ppin (pl.DataFrame): _description_
-            df_neighbors (pl.DataFrame): _description_
-            avg_prot_w_deg (float): _description_
+            df_w_ppin (pl.DataFrame): Weighted PPIN from the previous iteration.
+            df_neighbors (pl.DataFrame): Neighbors dataframe.
+            avg_prot_w_deg (float): Average protein weighted degree.
+            SCORE (str, optional): Either TOPO or TOPO_L2. Defaults to TOPO.
 
         Returns:
             pl.DataFrame: _description_
@@ -276,7 +303,20 @@ class TopoScoring:
             df_w_ppin = pl.concat(df_scored_batches, how="vertical")
         return df_w_ppin
 
-    def weight(self, k: int, df_l1_ppin: pl.DataFrame, df_l2_ppin: pl.DataFrame):
+    def weight(
+        self, k: int, df_l1_ppin: pl.DataFrame, df_l2_ppin: pl.DataFrame
+    ) -> pl.DataFrame:
+        """
+        Weights the level-1 and level-2 PPIN via iterative AdjustCD.
+
+        Args:
+            k (int): Number of iterations.
+            df_l1_ppin (pl.DataFrame): Level-1 PPIN.
+            df_l2_ppin (pl.DataFrame): Level-2 PPIN.
+
+        Returns:
+            pl.DataFrame: Weighted level-1 and level-2 PPIN.
+        """
         df_w_ppin = pl.DataFrame()
         for i in range(k):
             df_neighbors = self.get_neighbors(df_l1_ppin)
@@ -305,15 +345,13 @@ class TopoScoring:
     def main(self, df_ppin: pl.DataFrame, k: int = 2) -> pl.DataFrame:
         """
         TopoScoring main method.
-        Scores PPIs from the original PPIN only.
-        Doesn't score indirect interactions.
 
         Args:
-            df_ppin (pl.DataFrame): _description_
-            k (int, optional): _description_. Defaults to 2.
+            df_ppin (pl.DataFrame): Original PPIN.
+            k (int, optional): Number of iterations. Defaults to 2.
 
         Returns:
-            pl.DataFrame: _description_
+            pl.DataFrame: Weighted level-1 and level-2 PPIN.
         """
 
         # Weighted PPIN at k=0
