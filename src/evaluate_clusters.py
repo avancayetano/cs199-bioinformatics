@@ -416,13 +416,25 @@ class ClustersEvaluator:
         test_complexes = self.test_complexes[xval_iter]
 
         # Get only clusters whose density >= dens_thresh.
+        top_clusters = list(
+            filter(
+                lambda scored_cluster: scored_cluster["DENSITY"] >= dens_thresh,
+                scored_clusters,
+            )
+        )
+
+        # save the latest top clusters
+        if method in self.sv_methods:
+            self.sv_clusters[inflation][n_edges][method][xval_iter] = top_clusters
+        elif method in self.feat_methods:
+            self.feat_clusters[inflation][n_edges][method] = top_clusters
+        else:  # for method == unweighted
+            self.unw_clusters[inflation] = top_clusters
+
         clusters = list(
             map(
                 lambda scored_cluster: scored_cluster["COMP_PROTEINS"],
-                filter(
-                    lambda scored_cluster: scored_cluster["DENSITY"] >= dens_thresh,
-                    scored_clusters,
-                ),
+                top_clusters,
             )
         )
 
@@ -470,13 +482,15 @@ class ClustersEvaluator:
         recall_denominator = len(test_complexes)
         recall = recall_numerator / recall_denominator
 
+        n_clusters = len(clusters)
+
         if prec + recall > 0:
             f1_score = (2 * prec * recall) / (prec + recall)
         else:
-            print("WARNING! Zero precision and recall. F-score set to 0.")
+            print(
+                f"WARNING! Zero precision and recall. F-score set to 0. method={method}. match_thresh={match_thresh}."
+            )
             f1_score = 0
-
-        n_clusters = len(clusters)
 
         return {
             INFLATION: inflation,
@@ -706,7 +720,7 @@ if __name__ == "__main__":
         "==================== CLUSTER EVALUATION ON COMPOSITE NETWORK =================="
     )
     cluster_eval = ClustersEvaluator(dip=False)
-    cluster_eval.main(re_eval=False)
+    cluster_eval.main(re_eval=True)
     print("==============================================================")
     print()
 
@@ -715,7 +729,7 @@ if __name__ == "__main__":
         "==================== CLUSTER EVALUATION ON DIP COMPOSITE NETWORK =================="
     )
     cluster_eval = ClustersEvaluator(dip=True)
-    cluster_eval.main(re_eval=False)
+    cluster_eval.main(re_eval=True)
     print("==============================================================")
     print()
 

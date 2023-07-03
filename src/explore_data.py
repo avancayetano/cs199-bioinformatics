@@ -8,6 +8,7 @@ import seaborn as sns
 from aliases import (
     CO_OCCUR,
     COMP_ID,
+    COMP_PROTEINS,
     FEATURES,
     IS_CO_COMP,
     IS_NIP,
@@ -33,7 +34,7 @@ from utils import (
 
 class ExploratoryDataAnalysis:
     """
-    Exploratory Data Analysis and some scratch/explorations I did.
+    Exploratory Data Analysis and some scratch/explorations/checks I did.
     This is undocumented, but there is no need to read this.
 
     - [X] Heatmap of features correlation
@@ -54,6 +55,49 @@ class ExploratoryDataAnalysis:
         self.cyc_comp_pairs = get_cyc_comp_pairs()
         self.model_prep = ModelPreprocessor()
 
+    def swc_xgw_crossvals_match(self):
+        df_cross_val = pl.read_csv("../data/preprocessed/cross_val_table.csv")
+        swc_complexes = []
+        with open("../data/preprocessed/cross_val.csv") as file:
+            for line in file.readlines():
+                line = line.strip()
+                if line.startswith("iter"):
+                    swc_complexes.append([])
+                else:
+                    swc_complexes[-1].append(int(line))
+
+        for i in range(10):
+            swc_comps = list(sorted(swc_complexes[i]))
+            xgw_comps = (
+                df_cross_val.filter(pl.col(f"ITER_{i}") == "test")
+                .select(COMP_ID)
+                .to_series()
+                .sort()
+                .to_list()
+            )
+            print(xgw_comps == swc_comps)
+
+        df_cross_val = pl.read_csv("../data/preprocessed/dip_cross_val_table.csv")
+        swc_complexes = []
+        with open("../data/preprocessed/dip_cross_val.csv") as file:
+            for line in file.readlines():
+                line = line.strip()
+                if line.startswith("iter"):
+                    swc_complexes.append([])
+                else:
+                    swc_complexes[-1].append(int(line))
+
+        for i in range(10):
+            swc_comps = list(sorted(swc_complexes[i]))
+            xgw_comps = (
+                df_cross_val.filter(pl.col(f"ITER_{i}") == "test")
+                .select(COMP_ID)
+                .to_series()
+                .sort()
+                .to_list()
+            )
+            print(xgw_comps == swc_comps)
+
     def check_cross_val(self):
         df_cross_val = pl.read_csv("../data/preprocessed/cross_val_table.csv")
         df_dip_cross_val = pl.read_csv("../data/preprocessed/dip_cross_val_table.csv")
@@ -65,11 +109,11 @@ class ExploratoryDataAnalysis:
             test_complexes = get_complexes_list(xval_iter, "test", False)
             for cmp in test_complexes:
                 if len(cmp) <= 3:
-                    assert "ERROR"
+                    raise
             dip_test_complexes = get_complexes_list(xval_iter, "test", True)
             for cmp in dip_test_complexes:
                 if len(cmp) <= 3:
-                    assert "ERROR"
+                    raise
 
             # check if all test complexes are covered
             df_complex_ids = df_cross_val.filter(
@@ -89,7 +133,7 @@ class ExploratoryDataAnalysis:
 
         print(df.filter(pl.col("count") != 9))
         print(df_dip.filter(pl.col("count") != 9))
-        print("Correct!!!")
+        print("Correct cross-val table!!!")
 
     def explore_absent_cocomp_edges(self):
         print(self.cyc_comp_pairs.shape[0])
@@ -104,8 +148,84 @@ class ExploratoryDataAnalysis:
             ).shape[0]
         )
 
+    def check_proteins_case(self):
+        cyc_prots = get_unique_proteins(get_cyc_comp_pairs()).to_list()
+        orig_prots = get_unique_proteins(self.df_composite).to_list()
+        dip_prots = get_unique_proteins(self.df_dip_composite).to_list()
+
+        uncapital_cyc_prots = list(filter(lambda p: p != p.upper(), cyc_prots))
+        uncapital_orig_prots = list(filter(lambda p: p != p.upper(), orig_prots))
+        uncapital_dip_prots = list(filter(lambda p: p != p.upper(), dip_prots))
+
+        print(uncapital_cyc_prots)
+        print(uncapital_orig_prots)
+        print(uncapital_dip_prots)
+
+        assert len(uncapital_cyc_prots) == 0
+        assert len(uncapital_orig_prots) == 0
+        assert len(uncapital_dip_prots) == 0
+
+        print("CORRECT PROTEIN CASE!!!")
+
     def explore_complexes_clusters(self):
-        pass
+        """
+        Check if they are formatted correctly.
+        """
+        cmps = get_all_cyc_complexes().select(COMP_PROTEINS).to_series().to_list()
+        complexes = list(map(lambda c: set(c), cmps))
+        clusters = get_clusters_list(
+            "../data/clusters/all_edges/cross_val/out.xgw_iter0.csv.I20"
+        )
+        dip_clusters = get_clusters_list(
+            "../data/clusters/all_edges/cross_val/out.dip_xgw_iter0.csv.I20"
+        )
+
+        not_allowed = [" ", "\n", "\t", ","]
+        allowed_sizes = [5, 6, 7, 9]
+        for c in complexes:
+            for p in c:
+                for char in not_allowed:
+                    if char in p:
+                        print("ERROR")
+                        raise
+                if p[0] not in ["R", "Q", "Y"]:
+                    print("ERROR")
+                    raise
+
+                if len(p) not in allowed_sizes:
+                    print(p)
+                    print("ERROR")
+                    raise
+        for c in clusters:
+            for p in c:
+                for char in not_allowed:
+                    if char in p:
+                        print("ERROR")
+                        raise
+                if p[0] not in ["R", "Q", "Y"]:
+                    print("ERROR")
+                    raise
+
+                if len(p) not in allowed_sizes:
+                    print(p)
+                    print("ERROR")
+                    raise
+        for c in dip_clusters:
+            for p in c:
+                for char in not_allowed:
+                    if char in p:
+                        print("ERROR")
+                        raise
+                if p[0] not in ["R", "Q", "Y"]:
+                    print("ERROR")
+                    raise
+
+                if len(p) not in allowed_sizes:
+                    print(p)
+                    print("ERROR")
+                    raise
+
+        print("ALL CORRECT [clusters and complexes list]!!!")
 
     def explore_l2_pairs(self):
         """
@@ -113,6 +233,77 @@ class ExploratoryDataAnalysis:
 
 
         """
+
+    def explore_small_large_complexes(self):
+        df = get_all_cyc_complexes()
+        df_large = df.filter(pl.col(COMP_PROTEINS).list.lengths() > 3)
+        df_small = df.join(df_large, on=COMP_ID, how="anti")
+
+        df_large_ids = df_large.select(COMP_ID)
+        df_small_ids = df_small.select(COMP_ID)
+
+        PAIR_TYPE = "PAIR_TYPE"
+        df_large_pairs = get_cyc_comp_pairs(df_large_ids).with_columns(
+            pl.lit(2).alias(PAIR_TYPE)
+        )
+        df_small_pairs = get_cyc_comp_pairs(df_small_ids).with_columns(
+            pl.lit(1).alias(PAIR_TYPE)
+        )
+
+        df_labeled = (
+            self.df_composite.join(
+                df_large_pairs, on=[PROTEIN_U, PROTEIN_V], how="left"
+            )
+            .join(df_small_pairs, on=[PROTEIN_U, PROTEIN_V], how="left")
+            .fill_null(pl.lit(0))
+        ).select(
+            [
+                PROTEIN_U,
+                PROTEIN_V,
+                *FEATURES,
+                (pl.col(PAIR_TYPE) + pl.col("PAIR_TYPE_right")).alias(PAIR_TYPE),
+            ]
+        )
+
+        print(df_labeled)
+
+        df_pd_display = df_labeled.melt(
+            id_vars=[PROTEIN_U, PROTEIN_V, PAIR_TYPE],
+            variable_name="FEATURE",
+            value_name="VALUE",
+        ).to_pandas()
+
+        plt.figure()
+        ax = sns.barplot(data=df_pd_display, x="FEATURE", y="VALUE", hue=PAIR_TYPE)
+        ax.set_title(f"small vs large")
+
+        # DIP
+        df_labeled = (
+            self.df_dip_composite.join(
+                df_large_pairs, on=[PROTEIN_U, PROTEIN_V], how="left"
+            )
+            .join(df_small_pairs, on=[PROTEIN_U, PROTEIN_V], how="left")
+            .fill_null(pl.lit(0))
+        ).select(
+            [
+                PROTEIN_U,
+                PROTEIN_V,
+                *FEATURES,
+                (pl.col(PAIR_TYPE) + pl.col("PAIR_TYPE_right")).alias(PAIR_TYPE),
+            ]
+        )
+
+        print(df_labeled)
+
+        df_pd_display = df_labeled.melt(
+            id_vars=[PROTEIN_U, PROTEIN_V, PAIR_TYPE],
+            variable_name="FEATURE",
+            value_name="VALUE",
+        ).to_pandas()
+
+        plt.figure()
+        ax = sns.barplot(data=df_pd_display, x="FEATURE", y="VALUE", hue=PAIR_TYPE)
+        ax.set_title(f"small vs large DIP")
 
     def explore_perfect_l2(self):
         """
@@ -382,7 +573,11 @@ class ExploratoryDataAnalysis:
         # self.explore_swc_features()
         # self.explore_perfect_l2()
         # self.explore_absent_cocomp_edges()
-        self.check_cross_val()
+        # self.check_cross_val()
+        # self.explore_small_large_complexes()
+        # self.check_proteins_case()
+        self.swc_xgw_crossvals_match()
+        # self.explore_complexes_clusters()
         plt.show()
 
 

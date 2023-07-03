@@ -168,18 +168,6 @@ data/backup/
 data/databases/large/**/*
 !data/databases/large/**/
 
-# training data artifacts
-data/training/**/*
-!data/training/**/
-
-# MCL cluster results
-data/clusters/**/*
-!data/clusters/**/
-
-# MCL cluster results
-data/scored_clusters/**/*
-!data/scored_clusters/**/
-
 # Weighting results
 data/weighted/**/*
 !data/weighted/**/
@@ -187,5 +175,6 @@ data/weighted/**/*
 typings/
 
 !README.md
+!irefindex 559292 mitab26.zip
 
 *_env/

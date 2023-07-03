@@ -38,9 +38,9 @@ class CompEdgesEvaluator:
             dip (bool): Whether to evaluate DIP composite network or not.
         """
 
-        self.sv_methods = ["swc", "xgw"]
+        self.sv_methods = ["SWC", "XGW"]
         self.feat_methods = FEATURES + [method["name"] for method in SUPER_FEATS]
-        self.methods = self.sv_methods + self.feat_methods + ["unweighted"]
+        self.methods = self.sv_methods + self.feat_methods + ["UNWEIGHTED"]
         self.n_iters = 10
 
         self.dip = dip
@@ -73,6 +73,7 @@ class CompEdgesEvaluator:
                 df_composite_test = self.df_labeled.join(
                     df_train_pairs, on=[PROTEIN_U, PROTEIN_V], how="anti"
                 )
+
                 for method in self.methods:
                     path = get_weighted_filename(
                         method,
@@ -113,14 +114,7 @@ class CompEdgesEvaluator:
 
                 print()
 
-            df_evals = (
-                pl.DataFrame(evals)
-                .groupby(METHOD)
-                .mean()
-                .select(pl.exclude(XVAL_ITER))
-                .sort([LOG_LOSS, BRIER_SCORE, PR_AUC], descending=[False, False, True])
-            )
-
+            df_evals = pl.DataFrame(evals)
             df_evals.write_csv(f"../data/evals/{prefix}comp_evals.csv", has_header=True)
 
         # plots
@@ -128,11 +122,18 @@ class CompEdgesEvaluator:
         n_methods = 12  # Plot only the top 12 methods
         df_evals = pl.read_csv(f"../data/evals/{prefix}comp_evals.csv", has_header=True)
 
+        df_evals_avg = (
+            df_evals.groupby(METHOD)
+            .mean()
+            .select(pl.exclude(XVAL_ITER))
+            .sort([LOG_LOSS, BRIER_SCORE, PR_AUC], descending=[False, False, True])
+        )
+
         print("Average of all evaluations on all the cross-val iterations")
-        print(df_evals)
+        print(df_evals_avg)
 
         df_loss_top = (
-            df_evals.sort([LOG_LOSS, BRIER_SCORE], descending=[False, False])
+            df_evals_avg.sort([LOG_LOSS, BRIER_SCORE], descending=[False, False])
             .head(n_methods)
             .select([METHOD, LOG_LOSS, BRIER_SCORE])
             .melt(id_vars=METHOD, variable_name=METRIC, value_name=VALUE)
@@ -147,7 +148,7 @@ class CompEdgesEvaluator:
         plt.xticks(rotation=15)
 
         df_auc_top = (
-            df_evals.sort(PR_AUC, descending=True)
+            df_evals_avg.sort(PR_AUC, descending=True)
             .head(n_methods)
             .select([METHOD, PR_AUC])
             .melt(id_vars=METHOD, variable_name=METRIC, value_name=VALUE)

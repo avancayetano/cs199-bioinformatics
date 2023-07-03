@@ -1,19 +1,12 @@
 # pyright: basic
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+import json
+from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
 import polars as pl
-from sklearn.ensemble import (
-    GradientBoostingClassifier,
-    HistGradientBoostingClassifier,
-    RandomForestClassifier,
-    VotingClassifier,
-)
 from sklearn.model_selection import GridSearchCV
-from sklearn.neural_network import MLPClassifier
-from sklearn.pipeline import Pipeline
-from xgboost import XGBClassifier, XGBRFClassifier
+from xgboost import XGBClassifier
 
 from aliases import (
     IS_CO_COMP,
@@ -22,22 +15,9 @@ from aliases import (
     PROTEIN_U,
     PROTEIN_V,
     WEIGHT,
+    XVAL_ITER,
 )
 from assertions import assert_no_zero_weight
-
-# NOTE: XGBClassifier was used in the study.
-# However, SupervisedWeighting can work on any of these models,
-# as well as most of scikit-learn classifiers.
-Model = Union[
-    RandomForestClassifier,
-    MLPClassifier,
-    Pipeline,
-    VotingClassifier,
-    XGBClassifier,
-    XGBRFClassifier,
-    GradientBoostingClassifier,
-    HistGradientBoostingClassifier,
-]
 
 
 class SupervisedWeighting:
@@ -45,7 +25,7 @@ class SupervisedWeighting:
     Supervised co-complex probability weighting method.
     """
 
-    def __init__(self, model: Model, name: str, dip: bool):
+    def __init__(self, model: XGBClassifier, name: str, dip: bool):
         self.label = IS_CO_COMP
         self.model = model
         self.name = name
@@ -56,7 +36,7 @@ class SupervisedWeighting:
         params_grid: Dict[str, Union[List[str], List[int], List[float]]],
         X_train: np.ndarray[Any, Any],
         y_train: np.ndarray[Any, Any],
-    ):
+    ) -> Dict[str, Union[int, float]]:
         """
         Tune the model via grid searching.
 
@@ -77,6 +57,7 @@ class SupervisedWeighting:
         print(f"Best parameters: {clf.best_params_}")
         print(f"Best score: {clf.best_score_}")
         self.model = clf.best_estimator_
+        return clf.best_params_
 
     def weight(
         self,
@@ -85,7 +66,8 @@ class SupervisedWeighting:
         xval_iter: int,
         tune: bool,
         params_grid: Dict[str, Union[List[str], List[int], List[float]]],
-    ) -> pl.DataFrame:
+        use_pretuned_params: bool,
+    ) -> Tuple[pl.DataFrame, Dict[str, Union[float, int]]]:
         """
         Weight the composite network based on co-complex probability.
 
@@ -95,15 +77,15 @@ class SupervisedWeighting:
             xval_iter (int): Cross-val iteration.
             tune (bool): Whether to tune the model or not.
             params_grid (Dict[str, Union[List[str], List[int], List[float]]]): Parameter grid for tuning.
+            use_pretuned_params (bool): Whether to use a saved set of hyperparameters.
 
         Returns:
-            pl.DataFrame: Weighted network.
+            Tuple[pl.DataFrame, Dict[str, Union[float, int]]]: Weighted network and feature importances
         """
-        if self.model is None:
-            return df_composite
         selected_features = df_composite.select(
             pl.exclude([PROTEIN_U, PROTEIN_V, self.label])
         ).columns
+
         print(f"Weighting model: {self.name}")
         print(f"Selected features: {selected_features}")
 
@@ -124,29 +106,45 @@ class SupervisedWeighting:
         if tune:
             print("Performing hyperparameter tuning...")
             params_grid["random_state"] = [xval_iter]  # for reproducibility
-            self.tune(params_grid, X_train, y_train)
+            best_params = self.tune(params_grid, X_train, y_train)
             print("Hyperparameter tuning done!")
-            print(f"Parameters used for fitting: {self.model.get_params()}")
+            params_file = (
+                f"../data/training/{self.prefix}xgw_params_iter{xval_iter}.json"
+            )
+            print(f"Writing best parameters to {params_file}")
+            with open(params_file, "w") as file:
+                json.dump(best_params, file, indent=4)
+            print("Training done!")
+
+        elif use_pretuned_params:
+            params_file = (
+                f"../data/training/{self.prefix}xgw_params_iter{xval_iter}.json"
+            )
+            with open(params_file) as file:
+                print(f"Using pretuned parameters in: {params_file}")
+                best_params = json.load(file)
+                print(f"Parameters: {best_params}")
+                self.model.set_params(**best_params)
+
+            self.model.fit(X_train, y_train)  # training the model
             print("Training done!")
 
         else:
             # For reproducibility
-            if type(self.model) == VotingClassifier:
-                for _, model in self.model.estimators:  # type: ignore
-                    try:
-                        model.set_params(random_state=xval_iter)
-                    except:
-                        pass
-            else:
-                try:
-                    print(f"Setting random state to {xval_iter}")
-                    self.model.set_params(random_state=xval_iter)
-                except:
-                    pass
+            self.model.set_params(random_state=xval_iter)
 
             self.model.fit(X_train, y_train)  # training the model
-            print(f"Parameters used for fitting: {self.model.get_params()}")
             print("Training done!")
+
+        params = self.model.get_params()
+        print(f"Parameters used for fitting: {params}")
+
+        feature_importances = {
+            F: self.model.feature_importances_[idx]
+            for idx, F in enumerate(selected_features)
+        }
+
+        feature_importances[XVAL_ITER] = xval_iter
 
         # After learning the parameters, weight all protein pairs
         X = df_composite.select(selected_features).to_numpy()
@@ -163,7 +161,7 @@ class SupervisedWeighting:
         )
 
         print("Weighting done!")
-        return df_w_composite
+        return df_w_composite, feature_importances
 
     def main(
         self,
@@ -172,7 +170,8 @@ class SupervisedWeighting:
         xval_iter: int,
         tune: bool,
         params_grid: Dict[str, Union[List[str], List[int], List[float]]],
-    ) -> pl.DataFrame:
+        use_pretuned_params: bool,
+    ) -> Tuple[pl.DataFrame, Dict[str, Union[float, int]]]:
         """
         Main method of SupervisedWeighting.
 
@@ -182,13 +181,19 @@ class SupervisedWeighting:
             xval_iter (int): Cross-val iteration.
             tune (bool): Whether to tune the model or not.
             params_grid (Dict[str, Union[List[str], List[int], List[float]]]): Parameter grid for tuning.
+            use_pretuned_params (bool): Whether to use a saved set of hyperparameters.
 
         Returns:
-            pl.DataFrame: Weighted network.
+            Tuple[pl.DataFrame, Dict[str, Union[float, int]]]: Weighted network and feature importances
         """
         print()
-        df_w_composite = self.weight(
-            df_composite, df_train_labeled, xval_iter, tune, params_grid
+        df_w_composite, feature_importances = self.weight(
+            df_composite,
+            df_train_labeled,
+            xval_iter,
+            tune,
+            params_grid,
+            use_pretuned_params,
         )
 
         df_w_composite = (
@@ -213,4 +218,4 @@ class SupervisedWeighting:
         )
         print()
 
-        return df_w_composite
+        return df_w_composite, feature_importances
