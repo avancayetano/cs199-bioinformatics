@@ -119,7 +119,7 @@ class CompEdgesEvaluator:
 
         # plots
         network = "DIP COMPOSITE NETWORK" if self.dip else "ORIGINAL COMPOSITE NETWORK"
-        n_methods = 12  # Plot only the top 12 methods
+        n_methods = 10  # Plot only the top 10 methods
         df_evals = pl.read_csv(f"../data/evals/{prefix}comp_evals.csv", has_header=True)
 
         df_evals_avg = (
@@ -145,7 +145,7 @@ class CompEdgesEvaluator:
         ax.set_title(
             f"{network}\nClassification of co-complex edges\nTop {n_methods} weighting methods in terms of log loss and Brier score loss."
         )
-        plt.xticks(rotation=15)
+        plt.xticks(rotation=30)
 
         df_auc_top = (
             df_evals_avg.sort(PR_AUC, descending=True)
@@ -160,7 +160,7 @@ class CompEdgesEvaluator:
         ax.set_title(
             f"{network}\nClassification of co-complex edges\nTop {n_methods} weighting methods in terms of Precision-Recall AUC."
         )
-        plt.xticks(rotation=15)
+        plt.xticks(rotation=30)
 
 
 if __name__ == "__main__":
@@ -171,14 +171,18 @@ if __name__ == "__main__":
         "------------------------ Evaluating the composite network --------------------"
     )
     evaluator = CompEdgesEvaluator(dip=False)
-    evaluator.main(re_eval=True)
+    evaluator.main(
+        re_eval=False
+    )  # NOTE: set this to True if you want to re-evaluate the co-complex classification performance evaluation..
     print()
 
     print(
         "------------------------ Evaluating the DIP composite network --------------------"
     )
     evaluator = CompEdgesEvaluator(dip=True)
-    evaluator.main(re_eval=True)
+    evaluator.main(
+        re_eval=False
+    )  # NOTE: set this to True if you want to re-evaluate the co-complex classification performance evaluation.
     print()
 
     plt.show()

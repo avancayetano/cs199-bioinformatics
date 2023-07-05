@@ -49,11 +49,15 @@ class ExploratoryDataAnalysis:
         self.df_composite = construct_composite_network(
             features=self.features, dip=False
         )
+
         self.df_dip_composite = construct_composite_network(
             features=self.features, dip=True
         )
         self.cyc_comp_pairs = get_cyc_comp_pairs()
         self.model_prep = ModelPreprocessor()
+
+        print(self.df_composite.describe())
+        print(self.df_dip_composite.describe())
 
     def swc_xgw_crossvals_match(self):
         df_cross_val = pl.read_csv("../data/preprocessed/cross_val_table.csv")
@@ -555,7 +559,7 @@ class ExploratoryDataAnalysis:
         print(df)
 
     def main(self):
-        print(self.df_composite)
+        # print(self.df_composite)
         # self.df_composite = self.model_prep.normalize_features(
         #     self.df_composite, self.features
         # )
@@ -576,7 +580,7 @@ class ExploratoryDataAnalysis:
         # self.check_cross_val()
         # self.explore_small_large_complexes()
         # self.check_proteins_case()
-        self.swc_xgw_crossvals_match()
+        # self.swc_xgw_crossvals_match()
         # self.explore_complexes_clusters()
         plt.show()
 

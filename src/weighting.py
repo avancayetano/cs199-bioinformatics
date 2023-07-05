@@ -1,3 +1,5 @@
+# pyright: basic
+
 """
 A script that weights the composite network using XGW and the features.
 """
@@ -5,7 +7,9 @@ A script that weights the composite network using XGW and the features.
 import time
 from typing import Dict, List, Union
 
+import matplotlib.pyplot as plt
 import polars as pl
+import seaborn as sns
 from xgboost import XGBClassifier
 
 from aliases import (
@@ -16,6 +20,7 @@ from aliases import (
     SUPER_FEATS,
     TOPO,
     WEIGHT,
+    XVAL_ITER,
 )
 from assertions import assert_df_bounded, assert_no_zero_weight
 from model_preprocessor import ModelPreprocessor
@@ -255,9 +260,19 @@ class Weighting:
             f"../data/training/{prefix}xgw_feat_importances.csv", has_header=True
         )
         print(f"Feature importances")
-        print(df_importances)
+        print(df_importances.mean())
+        df_pandas = (
+            df_importances.select(pl.exclude(XVAL_ITER))
+            .melt(variable_name="FEATURE", value_name="IMPORTANCE")
+            .to_pandas()
+        )
+        network = "DIP COMPOSITE NETWORK" if self.dip else "ORIGINAL COMPOSITE NETWORK"
+        plt.figure()
+        sns.set_palette("deep")
+        ax = sns.barplot(data=df_pandas, x="FEATURE", y="IMPORTANCE")
+        ax.set_title(f"Feature importances on the {network}")
 
-        # TODO: Plot the importances
+        print(df_pandas)
 
 
 if __name__ == "__main__":
@@ -267,12 +282,18 @@ if __name__ == "__main__":
 
     print("====================  Weighting the composite network ====================")
     weighting = Weighting(dip=False)
-    weighting.main(re_weight=False)
+    weighting.main(
+        re_weight=False
+    )  # NOTE: set this to True if you want to re-weight the network yourself.
     print()
 
     print("================== Weighting the DIP composite network ===================")
     weighting = Weighting(dip=True)
-    weighting.main(re_weight=False)
+    weighting.main(
+        re_weight=False
+    )  # NOTE: set this to True if you want to re-weight the network yourself.
     print()
+
+    plt.show()
 
     print(f"Execution time: {time.time() - start}")

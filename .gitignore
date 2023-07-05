@@ -168,10 +168,6 @@ data/backup/
 data/databases/large/**/*
 !data/databases/large/**/
 
-# Weighting results
-data/weighted/**/*
-!data/weighted/**/
-
 typings/
 
 !README.md

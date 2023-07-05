@@ -585,21 +585,6 @@ class ClustersEvaluator:
         )
         plt.xticks(rotation=15)
 
-        # # Plot the four curves
-        # TODO: plot only inflation=4 precision-recall curves.
-        # self.plot_prec_recall_curve(
-        #     df_all_050, df_top_methods, f"all edges, match_thresh=0.5"
-        # )
-        # self.plot_prec_recall_curve(
-        #     df_all_075, df_top_methods, f"all edges, match_thresh=0.75"
-        # )
-        # self.plot_prec_recall_curve(
-        #     df_20k_050, df_top_methods, f"20k edges, match_thresh=0.5"
-        # )
-        # self.plot_prec_recall_curve(
-        #     df_20k_075, df_top_methods, f"20k edges, match_thresh=0.75"
-        # )
-
     def plot_prec_recall_curve(
         self, df: pl.DataFrame, df_top_methods: pl.DataFrame, scenario: str
     ):
@@ -634,8 +619,6 @@ class ClustersEvaluator:
         """
         Gets the precision-recall curve given n_edges, match_thresh, and inflation.
         NOTE: Averages the precision and recall values on all the 10 cross-val iterations.
-        TODO: The above method may not be the best method. Maybe, try getting the AUC per
-            cross-val iteration, then average it after.
 
         Args:
             df_cluster_evals (pl.DataFrame): Cluster evaluations.
@@ -653,7 +636,7 @@ class ClustersEvaluator:
                 & (pl.col(MATCH_THRESH) == match_thresh)
                 & (pl.col(INFLATION) == inflation)
             )
-            .groupby([INFLATION, METHOD, DENS_THRESH])  # TODO: This may be unnecessary.
+            .groupby([INFLATION, METHOD, DENS_THRESH])
             .mean()
             .groupby([METHOD, DENS_THRESH])
             .mean()
@@ -720,7 +703,9 @@ if __name__ == "__main__":
         "==================== CLUSTER EVALUATION ON COMPOSITE NETWORK =================="
     )
     cluster_eval = ClustersEvaluator(dip=False)
-    cluster_eval.main(re_eval=True)
+    cluster_eval.main(
+        re_eval=False
+    )  # NOTE: Set this to True if you want to re-evaluate the clusters yourself (takes around 5-6 hours to run)
     print("==============================================================")
     print()
 
@@ -729,7 +714,9 @@ if __name__ == "__main__":
         "==================== CLUSTER EVALUATION ON DIP COMPOSITE NETWORK =================="
     )
     cluster_eval = ClustersEvaluator(dip=True)
-    cluster_eval.main(re_eval=True)
+    cluster_eval.main(
+        re_eval=False
+    )  # NOTE: Set this to True if you want to re-evaluate the clusters yourself (takes around 5-6 hours to run)
     print("==============================================================")
     print()
 
